@@ -138,3 +138,20 @@ Regression coverage includes zero-OI pages before a funded combo, thresholds
 1/10/100000, missing and fractional OI, pagination budgets, continuation,
 repeated cursors, and Stop. Public API inspection reproduced all-zero initial
 pages and positive OI on later pages; no account or order endpoint was used.
+
+## Combo-focused layout
+
+- Default to a full-width combo workspace, with no sports icon rail, order-book
+  sidebar, Turbo controls, or unrelated feed-status indicators.
+- Mount the original sports terminal only through More → Other tools. Its
+  WebSocket engine disconnects when leaving that terminal.
+- Keep five primary scanner fields visible; collapse secondary filters, import/
+  export, diagnostics, RFQs and model settings into labeled disclosures.
+- Use a single combo workflow bar; retain paper status, Stop, bid/ask comparison,
+  the leg editor, fee/risk checks and explicit create/RFQ confirmation dialogs.
+- Preserve the combo workspace while viewing Connection or Live positions.
+  Leaving pauses monitoring, aborts pending read requests and closes previews.
+  A request already submitted to Kalshi is not undone by changing views.
+- Extend `npm run test:ui` with the React shell regression: no default network
+  requests, deferred sports-tool mounting, preserved filters/catalog, disclosure
+  state, and automatic paper pause across account navigation.

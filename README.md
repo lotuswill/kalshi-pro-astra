@@ -73,3 +73,18 @@ See [Astra changes and limitations](docs/ASTRA_CHANGES.md),
 [original app documentation](docs/CLAUDE_BASELINE_README.md).
 
 Source remains subject to the included proprietary [LICENSE](LICENSE).
+
+### Combo-focused workspace
+
+After unlocking, the app opens directly to Combos with the full window available
+for the scanner and hedge editor. The workflow is Find combos → Build hedge →
+Paper trading, with Saved drafts alongside it. Search, OI, expiration, volume,
+and sort remain visible. More filters, Search details, and Data options contain
+secondary controls. Quotes & model assumptions contains RFQs and manual quotes.
+
+Connection and Live positions are in the app header. Visiting either preserves
+the combo catalog, selected hedge, filters, and drafts in this session. Active
+scans are interrupted and automatic paper monitoring pauses when leaving Combos;
+it does not restart automatically on return. More → Other tools opens the
+original sports terminal on demand, including its live trading controls.
+Sports feeds, trackers and sportsbook fetches do not start in the combo workspace.

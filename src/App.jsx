@@ -3,6 +3,7 @@ import { mlToProb, kalshiFee, kalshiFeeCents, calcArbProfit } from "./engine/fee
 import { FeedbackModule, sessionTracker } from "./Feedback.jsx";
 import { PostponedModule } from "./Postponed.jsx";
 import { CombosModule } from "./Combos.jsx";
+import { ComboDashboard } from "./ComboDashboard.jsx";
 import { TicketModule } from "./Ticket.jsx";
 import { PositionsModule } from "./Positions.jsx";
 import { extractTeamsFromTicker, extractTeamCodes, parseGameDate } from "./engine/tickers.js";
@@ -3608,7 +3609,8 @@ function MentorModule({ sheetTrackOn, onToggleSheetTrack, changeTick }) {
   );
 }
 
-function Dashboard() {
+function LegacyDashboard() {
+  useEffect(() => () => { wsEngine.autoTradeEnabled = false; wsEngine.disconnect(); }, []);
   const vault = useVault();
   const [tab, setTab] = useState("odds");
   const [espn, setEspn] = useState([]);
@@ -3912,6 +3914,22 @@ function Dashboard() {
 // ═══════════════════════════════════════════════════════════════
 // ROOT
 // ═══════════════════════════════════════════════════════════════
+function Dashboard() {
+  const vault = useVault();
+  const authFetch = useCallback((path, method, body) => {
+    const ak = vault.getKey("kalshi_api_key"), pk = vault.getKey("kalshi_private_key");
+    if (!ak || !pk) return Promise.reject(new Error("Add your Kalshi API Key ID and private key in Connection"));
+    return kalshiAuthFetch(path, method, body, ak, pk);
+  }, [vault]);
+  if (vault.locked) return <LockScreen />;
+  return <ComboDashboard profile={vault.profile} apiBase={KALSHI_API} authFetch={authFetch}
+    connected={!!vault.getKey("kalshi_api_key") && !!vault.getKey("kalshi_private_key")}
+    onLock={vault.lock} toast={vault.toast}
+    connection={() => <VaultPage />}
+    positions={() => <PositionsModule S={S} Badge={Badge} TBtn={TBtn} Empty={Empty} Pulse={Pulse} showToast={vault.showToast} authFetch={authFetch} apiBase={KALSHI_API} />}
+    otherTools={() => <LegacyDashboard />} />;
+}
+
 export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#050910", fontFamily: "'IBM Plex Mono','Fira Code',monospace", color: "#eaf0f6", display: "flex", flexDirection: "column" }}>
