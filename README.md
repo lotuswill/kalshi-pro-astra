@@ -9,7 +9,7 @@ Claude version. This repository is the independent Astra version.
 
 ## Run
 
-Use Node.js 22 or newer:
+Use Node.js 24.15+ in the 24.x LTS line (or a version allowed by `package.json`):
 
 ```sh
 npm ci
@@ -20,6 +20,22 @@ Open **http://127.0.0.1:5174**. On Windows, `START.bat` runs these steps.
 The separate port gives this app its own browser vault/settings storage.
 No cloud deployment is required. Existing local repositories may contain
 unpublished work: review their status before syncing this independent snapshot.
+
+### Update an existing Windows folder
+
+`UPDATE_LOCAL.ps1` downloads and tests a clean checkout first, then moves your
+existing `C:\Users\ash\git\kalshi-pro-astra` folder to a timestamped sibling
+backup and installs the tested checkout in its place. It never targets
+`kalshi-pro`. Unpublished edits and local-only files remain in the backup;
+they are not automatically merged into the new checkout. Browser vault data
+stays associated with the app's browser origin and is not copied by this script.
+
+Run the updater from PowerShell, or download it separately from this repository
+if the old checkout does not contain it yet. Its default destination is
+`$env:USERPROFILE\git\kalshi-pro-astra`; `-RepoRoot` overrides that path, and
+`-NoStart` installs without starting the server. It requires Git, a supported Node.js version
+and your Windows PowerShell policy to permit the script. Stop an existing
+Astra server before running the default update-and-start flow.
 
 Unlock/create your local Key Vault, open **Combos**, and choose **Load synthetic
 examples** for a complete walkthrough without sending exchange requests.
@@ -48,6 +64,7 @@ live-order features; the combo paper Stop button does not cancel those orders.
 ```sh
 npm test
 npm run test:ui
+npm run test:local
 npm run build
 ```
 
