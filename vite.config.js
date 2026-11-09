@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import {kalshiProxy} from './scripts/kalshi-proxy.mjs'
 
 export default defineConfig({
   plugins: [react()],
@@ -10,11 +11,8 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/espn/, ''),
       },
-      '/kalshi': {
-        target: 'https://api.elections.kalshi.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/kalshi/, ''),
-      },
+      '/kalshi-alt/': kalshiProxy('https://api.elections.kalshi.com', '/kalshi-alt'),
+      '/kalshi/': kalshiProxy('https://external-api.kalshi.com', '/kalshi'),
       '/sportsdb': {
         target: 'https://www.thesportsdb.com',
         changeOrigin: true,

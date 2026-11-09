@@ -42,3 +42,33 @@ test('direct combo lookup accepts 17 legs and does not require a book or scanner
   await assert.rejects(()=>transport('/api/kalshi/market?ticker=WRONG'),/identity mismatch/);
   await assert.rejects(()=>transport('/api/kalshi/market?ticker=%2Fetc'),/Invalid market/);
 });
+
+test('public reads fall back after a connection failure and reuse the working endpoint',async()=>{
+  const calls=[],notices=[];
+  const transport=createTransport({apiBase:'/kalshi/trade-api/v2',onStatus:m=>notices.push(m),fetcher:async (url,opts)=>{
+    calls.push({url,opts});if(url.startsWith('/kalshi/'))return {ok:false,status:502,json:async()=>({error:{code:'EAI_AGAIN'}})};
+    return {ok:true,json:async()=>({markets:[],cursor:null})};
+  }});
+  await transport('/api/kalshi/markets');await transport('/api/kalshi/markets');
+  assert.equal(calls.length,3);assert.ok(calls[1].url.startsWith('/kalshi-alt/'));assert.ok(calls[2].url.startsWith('/kalshi-alt/'));
+  assert.equal(notices.length,1);assert.ok(calls.every(c=>!c.opts.headers&&!c.opts.body&&!c.opts.method));
+});
+test('stalled reads time out even when fetch ignores abort and end with actionable diagnostics',async()=>{
+  const signals=[];
+  const transport=createTransport({apiBase:'/kalshi/trade-api/v2',requestTimeoutMs:10,fetcher:(_url,{signal})=>{signals.push(signal);return new Promise(()=>{});}});
+  await assert.rejects(()=>transport('/api/kalshi/markets'),/Cannot reach Kalshi.*Timed out.*diagnose:kalshi/);
+  assert.equal(signals.length,2);assert.ok(signals.every(s=>s.aborted));
+});
+test('a stalled JSON body is bounded and caller cancellation never starts fallback',async()=>{
+  const stuck=createTransport({apiBase:'/kalshi/trade-api/v2',requestTimeoutMs:10,fetcher:async()=>({ok:true,json:()=>new Promise(()=>{})})});
+  await assert.rejects(()=>stuck('/api/kalshi/markets'),/Timed out/);
+  const controller=new AbortController();let calls=0;
+  const stopped=createTransport({apiBase:'/kalshi/trade-api/v2',requestTimeoutMs:100,fetcher:async()=>{calls++;controller.abort(new Error('User stopped'));return new Promise(()=>{});}});
+  await assert.rejects(()=>stopped('/api/kalshi/markets',controller.signal),/User stopped/);assert.equal(calls,1);
+});
+test('not-found and authorization errors do not trigger retries or hide their status',async()=>{
+  for(const status of [401,403,404]){
+    let calls=0;const transport=createTransport({apiBase:'/kalshi/trade-api/v2',fetcher:async()=>{calls++;return {ok:false,status};}});
+    await assert.rejects(()=>transport('/api/kalshi/markets'),new RegExp(`HTTP ${status}`));assert.equal(calls,1);
+  }
+});

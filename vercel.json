@@ -3,7 +3,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/kalshi/:path*", "destination": "https://api.elections.kalshi.com/:path*" },
+    { "source": "/kalshi/:path*", "destination": "https://external-api.kalshi.com/:path*" },
+    { "source": "/kalshi-alt/:path*", "destination": "https://api.elections.kalshi.com/:path*" },
     { "source": "/espn/:path*", "destination": "https://site.api.espn.com/:path*" },
     { "source": "/sportsdb/:path*", "destination": "https://www.thesportsdb.com/:path*" },
     { "source": "/ncaa/:path*", "destination": "https://data.ncaa.com/:path*" },

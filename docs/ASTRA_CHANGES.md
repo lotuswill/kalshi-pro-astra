@@ -187,3 +187,25 @@ Only IDs are persisted; lookup metadata is fetched afresh. Unseen suffixes searc
 up to 20 listing pages and report incomplete coverage. Suffix collisions require
 the full ticker rather than choosing an arbitrary market. No quote acceptance
 or real order capability was added.
+
+## Local proxy reliability
+
+Direct API tests had missed the Vite proxy's outbound connection behavior. In
+this session, the old proxy returned an empty HTTP 500 with EAI_AGAIN while the
+environment-aware direct HTTPS client succeeded. The local proxy now supplies
+an explicit environment-aware HTTPS agent, uses the recommended external-api
+host and sends structured connection errors. It bounds DNS/connection waits as
+well as socket waits. TLS verification stays enabled.
+
+Public GETs use a 10-second request/body deadline, one alternate-host attempt
+on network/timeouts/server errors, and remember a working route for the session.
+Caller cancellation stops fallback. 401/403/404 are reported without retry.
+Authenticated write paths are not retried. Lookup progress and final failures
+are visible, and `npm run diagnose:kalshi` tests the actual local proxy path.
+Native and hosting route mappings include the same public fallback; no cloud
+deployment was performed.
+
+Validation includes a successful reference-ticker lookup through the real local
+Vite proxy, plus simulated stalled fetch/body, fallback, cancellation and
+non-retryable HTTP errors. This does not establish the precise network failure
+on the user's Windows machine; the diagnostic command can verify that path.

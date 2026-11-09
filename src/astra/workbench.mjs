@@ -18,7 +18,7 @@ function rememberTickers(markets){
   tickerIndex=[...new Set([...tickerIndex,...markets.filter(m=>m.venue==='kalshi'&&m.source==='live'&&comboQuery(m.id).kind==='full').map(m=>m.id)])].slice(-10000);
   try{localStorage.setItem(tickerIndexKey,JSON.stringify(tickerIndex));}catch{/* Index persistence is optional; current-session lookup still works. */}
 }
-const transport=createTransport({apiBase,authFetch});
+const transport=createTransport({apiBase,onStatus:message=>{if(!disposed){s.notice=message;render();}}});
 const dialog=document.createElement('dialog');surface.append(dialog);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=v=>v==null||!Number.isFinite(v)?'—':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(v);
@@ -56,7 +56,7 @@ async function paperChange(fn){
   if(!navigator.locks)throw new Error('Paper execution requires a browser with Web Locks support');
   await navigator.locks.request(storageKey+'-writer',{ifAvailable:true},async lock=>{if(!lock)throw new Error('Another tab is updating the paper ledger');const raw=localStorage.getItem(storageKey),current=raw?validateLedger(JSON.parse(raw)):emptyLedger(),next=fn(current);validateLedger(next);localStorage.setItem(storageKey,JSON.stringify(next));s.ledger=next;});
 }
-async function work(fn){if(s.busy||disposed||!workspaceActive)return;s.busy=true;requestAbort=new AbortController();s.error='';render();try{await fn();}catch(e){if(!stopRequested)s.error=e.message;s.auto=false;}finally{requestAbort=null;if(stopRequested){try{await paperChange(cancelPending);s.notice='Stopped. Pending paper orders cancelled. Existing paper positions remain open.';}catch(e){s.error=e.message;}stopRequested=false;}s.busy=false;render();}}
+async function work(fn){if(s.busy||disposed||!workspaceActive)return;s.busy=true;requestAbort=new AbortController();s.error='';render();try{await fn();}catch(e){if(!stopRequested){s.error=e.message;s.notice='';}s.auto=false;}finally{requestAbort=null;if(stopRequested){try{await paperChange(cancelPending);s.notice='Stopped. Pending paper orders cancelled. Existing paper positions remain open.';}catch(e){s.error=e.message;}stopRequested=false;}s.busy=false;render();}}
 function download(name,data){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function refresh(){
   if(s.source==='sample'){merge((await json('/api/sample')).markets);}
@@ -107,6 +107,7 @@ async function lookupTicker(){
   if(ids.length>1){
     s.notice=`${ids.length} tickers share suffix ${query}. Paste the exact full ticker to choose: ${ids.join(', ')}`;return;
   }
+  s.notice=`Looking up ${ids[0]} directly on Kalshi…`;render();
   const result=await json('/api/kalshi/market?ticker='+encodeURIComponent(ids[0]));
   if(stopRequested||disposed)return;
   if(s.source!=='kalshi'){

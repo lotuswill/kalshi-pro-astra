@@ -2,9 +2,42 @@ import {kalshiMarket,kalshiBook,assertTicker} from './adapters.mjs';
 import {checkLegs,validateCatalog} from './engine.mjs';
 import {sample} from './sample.mjs';
 
-export function createTransport({apiBase,fetcher=(...args)=>fetch(...args)}={}) {
+export function createTransport({apiBase,fetcher=(...args)=>fetch(...args),onStatus=()=>{},requestTimeoutMs=10000}={}) {
   if(typeof apiBase!=='string'||!apiBase.startsWith('/kalshi/'))throw new Error('Expected the local Kalshi proxy');
-  const get=async(path,signal)=>{const response=await fetcher(apiBase+path,{signal,cache:'no-store'});if(!response.ok)throw new Error(`Kalshi HTTP ${response.status}`);return response.json();};
+  if(!Number.isFinite(requestTimeoutMs)||requestTimeoutMs<=0)throw new Error('Invalid request timeout');
+  const alternate=apiBase.replace('/kalshi/','/kalshi-alt/');let preferred=apiBase;
+  async function read(base,path,parent){
+    if(parent?.aborted)throw parent.reason||new Error('Request stopped');
+    const controller=new AbortController();let timer,onAbort;
+    const deadline=new Promise((_,reject)=>{
+      const fail=error=>{controller.abort(error);reject(error);};
+      timer=setTimeout(()=>fail(new Error(`Timed out after ${requestTimeoutMs/1000}s`)),requestTimeoutMs);
+      onAbort=()=>fail(parent.reason||new Error('Request stopped'));
+      parent?.addEventListener('abort',onAbort,{once:true});
+    });
+    try{return await Promise.race([deadline,(async()=>{
+      const response=await fetcher(base+path,{signal:controller.signal,cache:'no-store'});
+      if(!response.ok){
+        let code='';try{const body=await response.json();if(/^[A-Z0-9_]+$/.test(body?.error?.code||''))code=` (${body.error.code})`;}catch{}
+        const error=new Error(`Kalshi HTTP ${response.status}${code}`);error.status=response.status;throw error;
+      }
+      try{return await response.json();}catch{throw new Error('Local proxy returned an invalid response; restart the dev server');}
+    })()]);}finally{clearTimeout(timer);parent?.removeEventListener('abort',onAbort);}
+  }
+  const get=async(path,signal)=>{
+    const bases=[preferred,preferred===apiBase?alternate:apiBase],failures=[];
+    for(const base of bases){
+      try{const data=await read(base,path,signal);preferred=base;return data;}
+      catch(error){
+        if(signal?.aborted)throw signal.reason||error;
+        // Only these public GETs can fall back. Authenticated actions never use this transport.
+        if(error.status&&error.status<500&&![408,429].includes(error.status))throw error;
+        failures.push(error.message);
+        if(failures.length===1)onStatus('Kalshi connection is slow or unavailable. Trying the alternate public endpoint…');
+      }
+    }
+    throw new Error(`Cannot reach Kalshi through the local server. ${failures.join('; ')}. Stop and restart npm run dev after updating. Run npm run diagnose:kalshi for a connection report.`);
+  };
   return async function request(route,signal) {
     const url=new URL(route,'http://localhost');
     if(url.pathname==='/api/sample'){const data=sample();data.markets=data.markets.filter(m=>m.venue==='kalshi');return data;}

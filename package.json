@@ -15,7 +15,8 @@
     "test:legacy": "vitest run src/engine/__tests__",
     "test:astra": "node --test tests/astra/*.test.mjs",
     "test:ui": "node tests/astra/ui-smoke.mjs && vitest run tests/astra/dashboard.test.jsx --environment jsdom",
-    "test:local": "node scripts/smoke-local.mjs"
+    "test:local": "node scripts/smoke-local.mjs",
+    "diagnose:kalshi": "node scripts/diagnose-kalshi.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

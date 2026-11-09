@@ -109,3 +109,19 @@ Discovery and leg editing support up to 32 legs (previously 12). Optimization
 remains bounded to 128 candidates; full scenario enumeration remains limited
 to 12 legs to keep large combos responsive. Lookup does not bypass paper gates
 or accept any quote.
+
+### If a lookup stays on Working
+
+Stop the existing dev server with Ctrl+C and restart `npm run dev` after pulling
+updates: the local proxy configuration runs in Node, not in the browser.
+The proxy uses Kalshi's dedicated production API host and honors existing
+HTTPS_PROXY/NO_PROXY settings. Public combo reads have a 10-second deadline per
+attempt and can try the alternate supported host once. Stop cancels the attempt;
+lookup failures clear Working and display a connection error. There is no retry
+of authenticated writes, RFQs or order actions.
+
+Run `npm run diagnose:kalshi` for a public, end-to-end check of the local Vite
+proxy, transport and reference combo normalization. It starts its own temporary
+loopback server on an available port, prints status and timing without keys or
+proxy credentials, and closes on completion. Optionally pass a full ticker:
+`npm run diagnose:kalshi -- KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G`.

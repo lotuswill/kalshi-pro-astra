@@ -9,7 +9,8 @@ import ReactDOM from 'react-dom/client'
 // in capacitor.config.json) routes fetch through the native layer,
 // which sidesteps CORS entirely.
 const NATIVE_PROXY = {
-  '/kalshi/': 'https://api.elections.kalshi.com/',
+  '/kalshi/': 'https://external-api.kalshi.com/',
+  '/kalshi-alt/': 'https://api.elections.kalshi.com/',
   '/espn/': 'https://site.api.espn.com/',
   '/sportsdb/': 'https://www.thesportsdb.com/',
   '/ncaa/': 'https://data.ncaa.com/',

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {sample} from '../../src/astra/sample.mjs';
 const {JSDOM}=await import(process.env.JSDOM_MODULE||'jsdom');
 const dom=new JSDOM('<!doctype html><body><div id="host"></div></body>',{url:'http://127.0.0.1:5174',pretendToBeVisual:true});
-const w=dom.window,intervals=new Map();let seq=0,hang=false,listingCalls=0,listingMode='paged';const writes=[];
+const w=dom.window,intervals=new Map();let seq=0,hang=false,networkFail=false,listingCalls=0,listingMode='paged';const writes=[];
 for(const key of ['window','document','localStorage','FormData','File','Blob'])Object.defineProperty(globalThis,key,{value:key==='window'?w:w[key],configurable:true,writable:true});
 Object.defineProperty(globalThis,'navigator',{value:w.navigator,configurable:true});
 Object.defineProperty(w.navigator,'locks',{value:{request:async(_name,_opts,fn)=>fn({})}});
@@ -11,6 +11,7 @@ w.setInterval=(fn,ms)=>{intervals.set(++seq,{fn,ms});return seq;};w.clearInterva
 const referenceTicker='KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G';let directCalls=0;
 const raw=m=>({ticker:m.id,title:m.title,status:'active',notional_value_dollars:'1.00',mve_selected_legs:m.legs.length>1?m.legs.map(l=>({market_ticker:l.marketId,event_ticker:l.eventId,side:l.outcome})):undefined,open_interest_fp:String(m.openInterest),volume_fp:String(m.volume),volume_24h_fp:String(m.volume24h),expiration_time:new Date(m.expiration).toISOString(),close_time:new Date(m.closeAt).toISOString(),yes_bid_dollars:String(m.bid),yes_ask_dollars:String(m.ask),mve_collection_ticker:'COLLECTION'});
 globalThis.fetch=async(url,{signal}={})=>{
+  if(networkFail)return {ok:false,status:502,json:async()=>({error:{code:'EAI_AGAIN'}})};
   if(hang)await new Promise((_,reject)=>{if(signal.aborted)reject(new Error('Aborted'));else signal.addEventListener('abort',()=>reject(new Error('Aborted')),{once:true});});
   const markets=sample().markets.filter(m=>m.venue==='kalshi');
   if(url.endsWith('/markets/'+referenceTicker)){
@@ -90,6 +91,13 @@ assert.ok(JSON.parse(localStorage.getItem('kalshi-astra-combo-tickers-v1:test'))
 click(`button[data-market="kalshi:${referenceTicker}"]`);assert.equal(shadow.querySelectorAll('[data-keep]').length,17);
 click('[data-page="scanner"]');await findTicker(referenceTicker.toLowerCase());assert.equal(directCalls,2);
 listingMode='zero';listingCalls=0;await findTicker('UNKNOWN99');assert.equal(listingCalls,20);assert.match(root.textContent,/not an exchange-wide suffix index/);
+networkFail=true;
+const failedInput=$('[data-filter="search"]');failedInput.value=referenceTicker;failedInput.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+for(let i=0;i<25;i++)await new Promise(r=>setTimeout(r,0));
+assert.match($('[role="alert"]').textContent,/Cannot reach Kalshi.*EAI_AGAIN/);
+assert.ok(!root.textContent.includes('WORKING…'),'Failed lookup must release the busy state');
+assert.equal($('[role="status"]'),null,'Stale lookup progress must be cleared after failure');
+networkFail=false;await findTicker(referenceTicker);assert.match(root.textContent,/Direct ticker match/);
 assert.ok(writes.every(r=>!r.path.includes('/orders')&&!r.path.includes('/accept')));
 dispose();assert.equal(intervals.size,0);assert.equal(root.children.length,0);assert.equal(shadow.querySelector('dialog'),null);
 dom.window.close();console.log('Integrated shadow-DOM workflow passed: scanner, paper lifecycle, explicit create/RFQ approvals, cancel, Stop, and unmount cleanup.');
