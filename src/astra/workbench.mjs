@@ -47,7 +47,12 @@ function compare(){
 }
 function selectedRow(){const c=compare();return c.rows.find(r=>r.id===s.selectedVariant)||c.rows[0]||null;}
 function pick(key){s.maxRemoved=1;s.selected=key;s.pinned.clear();s.custom=false;s.selectedVariant=null;s.keep=new Set(original()?.legs.map(legKey)||[]);s.page='optimizer';s.auto=false;}
-let requestAbort=null,stopRequested=false;
+let requestAbort=null,stopRequested=false,lookupTimer=null;
+const clearLookupTimer=()=>{if(lookupTimer!==null){window.clearTimeout(lookupTimer);lookupTimer=null;}};
+const catalogFull=()=>s.catalog.markets.length+200>9600;
+function searchValue(){return root.querySelector('[data-filter="search"]')?.value.trim()??s.filters.search;}
+function runLookup(){clearLookupTimer();s.filters={...s.filters,search:searchValue()};return work(lookupTicker);}
+
 async function json(url){if(disposed)throw new Error('Combos page closed');return transport(url,requestAbort?AbortSignal.any([requestAbort.signal,AbortSignal.timeout(60000)]):AbortSignal.timeout(60000));}
 function merge(markets){const map=new Map(s.catalog.markets.map(m=>[marketKey(m),m]));for(const m of markets){const old=map.get(marketKey(m));const sameRules=old&&JSON.stringify([old.legs,old.rules,old.payout])===JSON.stringify([m.legs,m.rules,m.payout]);map.set(marketKey(m),sameRules?{...m,rulesVerified:old.rulesVerified,productSettlement:old.productSettlement,fee:old.fee}:m);}s.catalog=validateCatalog({version:1,markets:[...map.values()]});rememberTickers(markets);}
 async function paperChange(fn){
@@ -56,7 +61,7 @@ async function paperChange(fn){
   if(!navigator.locks)throw new Error('Paper execution requires a browser with Web Locks support');
   await navigator.locks.request(storageKey+'-writer',{ifAvailable:true},async lock=>{if(!lock)throw new Error('Another tab is updating the paper ledger');const raw=localStorage.getItem(storageKey),current=raw?validateLedger(JSON.parse(raw)):emptyLedger(),next=fn(current);validateLedger(next);localStorage.setItem(storageKey,JSON.stringify(next));s.ledger=next;});
 }
-async function work(fn){if(s.busy||disposed||!workspaceActive)return;s.busy=true;requestAbort=new AbortController();s.error='';render();try{await fn();}catch(e){if(!stopRequested){s.error=e.message;s.notice='';}s.auto=false;}finally{requestAbort=null;if(stopRequested){try{await paperChange(cancelPending);s.notice='Stopped. Pending paper orders cancelled. Existing paper positions remain open.';}catch(e){s.error=e.message;}stopRequested=false;}s.busy=false;render();}}
+async function work(fn){if(s.busy||disposed||!workspaceActive)return;clearLookupTimer();s.busy=true;requestAbort=new AbortController();s.error='';render();try{await fn();}catch(e){if(!stopRequested){s.error=e.message;s.notice='';}s.auto=false;}finally{requestAbort=null;if(stopRequested){try{await paperChange(cancelPending);s.notice='Stopped. Pending paper orders cancelled. Existing paper positions remain open.';}catch(e){s.error=e.message;}stopRequested=false;}s.busy=false;render();}}
 function download(name,data){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function refresh(){
   if(s.source==='sample'){merge((await json('/api/sample')).markets);}
@@ -70,12 +75,12 @@ async function refresh(){
   if(!stopRequested&&s.ledger.pending.length)await paperChange(current=>processPending(current,s.catalog));
 }
 // Search a bounded batch instead of treating the first (often zero-OI) page as the market.
-async function discover(maxPages,suffix=null){
+async function discover(maxPages){
   let reason='Page budget reached';
   const seen=new Set();
   for(let page=0;page<maxPages&&!stopRequested&&!disposed;page++){
     // Leave room for leg books and reduced combos within the 10,000-instrument catalog.
-    if(s.catalog.markets.length+200>9600){reason='Local catalog limit reached; export or reload to start a new scan';break;}
+    if(catalogFull()){reason='Local catalog limit reached; export or reload to start a new scan';break;}
     const cursor=s.cursor||'';
     if(seen.has(cursor))throw new Error('Kalshi repeated a pagination cursor. Loaded results are retained; reload to retry.');
     seen.add(cursor);
@@ -84,26 +89,16 @@ async function discover(maxPages,suffix=null){
     const matches=scan(s.catalog,s.filters).length;
     s.notice=`Searching: ${s.pages} pages loaded, ${matches} matches. Stop keeps loaded results.${result.warnings?.length?` ${result.warnings.length} unsupported records skipped on this page.`:''}`;
     render();
-    if(suffix&&resolveComboTickers(suffix,tickerIndex).length){reason='Suffix found';break;}
     if(!s.cursor){reason='End of listing reached';break;}
   }
-  if(!stopRequested)s.notice=`${reason}. ${s.pages} pages loaded; ${scan(s.catalog,s.filters).length} matches. ${s.cursor?'Search more pages to continue. Results are not exchange-wide.':''} Listing quotes require a book refresh.`;
+  if(!stopRequested)s.notice=`${reason}. ${s.pages} pages loaded; ${scan(s.catalog,s.filters).length} matches. ${s.cursor?(catalogFull()?'Use direct ticker lookup for a specific market.':'Search more pages to continue. Results are not exchange-wide.'):''} Listing quotes require a book refresh.`;
 }
 async function lookupTicker(){
   s.auto=false;
   const {kind,query}=comboQuery(s.filters.search);s.lookupIds=[];
   if(kind==='text'){s.notice='Text search filters loaded markets. Enter a full combo ticker or its last 9 characters for direct lookup.';return;}
   let ids=resolveComboTickers(query,[...tickerIndex,...s.catalog.markets.filter(m=>m.venue==='kalshi').map(m=>m.id)]);
-  if(!ids.length){
-    if(s.source!=='kalshi'){
-      if(s.ledger.pending.length)await paperChange(cancelPending);
-      s.catalog={version:1,markets:[]};s.source='kalshi';s.cursor=null;s.pages=0;s.selected=null;
-    }
-    if(!s.pages||s.cursor)await discover(20,query);
-    if(stopRequested||disposed)return;
-    ids=resolveComboTickers(query,tickerIndex);
-  }
-  if(!ids.length){s.notice=`Suffix ${query} was not found in known or searched tickers. This is not an exchange-wide suffix index. Paste the full ticker once to look it up directly and remember its suffix, or search more pages.`;return;}
+  if(!ids.length){s.notice=`Suffix ${query} is not in the known ticker index. Paste the full ticker once for direct lookup; its suffix will then be remembered. No market pages were scanned.`;return;}
   if(ids.length>1){
     s.notice=`${ids.length} tickers share suffix ${query}. Paste the exact full ticker to choose: ${ids.join(', ')}`;return;
   }
@@ -125,7 +120,8 @@ function lookupResults(){
 function fold(id,label,body,cls=''){
   return `<details data-disclosure="${id}" class="${cls}" ${disclosures.has(id)?'open':''}><summary>${label}</summary>${body}</details>`;
 }
-function sourceControls(){return `<div class="actions">${button('live',s.source==='kalshi'?'Reload markets':'Load markets',s.busy||s.auto,'primary')}${s.cursor?button('scan-pages','Search more',s.busy||s.auto):''}${button('price-visible','Refresh match prices',s.busy||s.auto||s.source!=='kalshi')}${fold('data-tools','Data options',`<div class="actions">${button('sample','Load synthetic examples',s.busy||s.auto)}<label class="button">Import catalog<input id="import-file" class="sr-only" type="file" accept="application/json" ${s.busy||s.auto?'disabled':''}></label>${button('export','Export workspace',s.busy||!s.catalog.markets.length)}</div>`,'data-tools')}</div>`;}
+function sourceControls(){const tickerMode=comboQuery(s.filters.search).kind!=='text';return `<div class="actions">${button('live',tickerMode?'Find ticker':s.source==='kalshi'?'Reload markets':'Load markets',s.busy||s.auto,'primary')}${s.cursor&&!tickerMode?button('scan-pages','Search more',s.busy||s.auto||catalogFull()):''}${button('price-visible','Refresh match prices',s.busy||s.auto||s.source!=='kalshi')}${fold('data-tools','Data options',`<div class="actions">${button('sample','Load synthetic examples',s.busy||s.auto)}<label class="button">Import catalog<input id="import-file" class="sr-only" type="file" accept="application/json" ${s.busy||s.auto?'disabled':''}></label>${button('export','Export workspace',s.busy||!s.catalog.markets.length)}</div>`,'data-tools')}</div>`;}
+
 function scanner(){
   const rows=scan(s.catalog,s.filters),f=s.filters,diagnostics=scanDiagnostics(s.catalog,f),oi=diagnostics.otherFilters;
   const opts=(values,value)=>values.map(([v,l])=>`<option value="${v}" ${v===value?'selected':''}>${l}</option>`).join('');
@@ -133,12 +129,12 @@ function scanner(){
   const advancedCount=['volumePeriod','venue','expiryBasis','direction','maxLegs'].filter(k=>f[k]!==DEFAULT_FILTERS[k]).length;
   return `<div class="hero"><div><h1>Find combos</h1><p>Compare bids, asks, and the cost of each leg.</p></div>${sourceControls()}</div>
   ${lookupResults()}<section class="panel scanner-panel">
-  <fieldset class="filter-fields" ${s.busy?'disabled':''}><div class="filters"><label class="field">Search<input data-filter="search" value="${esc(f.search)}" placeholder="Title, ticker, or last 9 characters"><small>Press Enter to look up a ticker</small></label><label class="field">Minimum open interest<input data-filter="minOI" type="number" min="0" value="${f.minOI}"></label><label class="field">Expires within (hours)<input data-filter="hours" type="number" min="1" value="${f.hours}"></label><label class="field">Minimum volume<input data-filter="minVolume" type="number" min="0" value="${f.minVolume}"></label><label class="field">Sort by<select data-filter="sort">${opts([['expiration','First expiration'],['openInterest','Open interest'],['volume','Volume'],['gap','Bid − leg ask product'],['bid','Combo bid'],['ask','Combo ask'],['legs','Leg count']],f.sort)}</select></label></div>
+  <fieldset class="filter-fields" ${s.busy?'disabled':''}><div class="filters"><label class="field">Search<span class="ticker-search"><input data-filter="search" value="${esc(f.search)}" placeholder="Title, ticker, or last 9 characters">${button('lookup','Find',s.busy||s.auto)}</span><small>Full tickers and known suffixes look up automatically.</small></label><label class="field">Minimum open interest<input data-filter="minOI" type="number" min="0" value="${f.minOI}"></label><label class="field">Expires within (hours)<input data-filter="hours" type="number" min="1" value="${f.hours}"></label><label class="field">Minimum volume<input data-filter="minVolume" type="number" min="0" value="${f.minVolume}"></label><label class="field">Sort by<select data-filter="sort">${opts([['expiration','First expiration'],['openInterest','Open interest'],['volume','Volume'],['gap','Bid − leg ask product'],['bid','Combo bid'],['ask','Combo ask'],['legs','Leg count']],f.sort)}</select></label></div>
   ${fold('filters',`More filters${advancedCount?` · ${advancedCount} changed`:''}`,advanced,'filter-disclosure')}</fieldset>
   <div class="results-bar"><strong>Showing ${number(Math.min(100,rows.length))} of ${number(rows.length)} matches</strong><span>${number(diagnostics.loaded.total)} combos loaded</span><span>Highest OI: ${number(diagnostics.loaded.max)}</span>${badge(s.source==='sample'?'SYNTHETIC':s.source==='kalshi'?'KALSHI':s.source==='import'?'IMPORTED':'NO DATA',s.source==='sample'?'amber':'')}</div>
-  ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Combo</th><th>Legs</th><th>Open interest</th><th>${f.volumePeriod==='24h'?'24h':'Total'} volume</th><th>Expiration · Denver</th><th>Bid</th><th>Ask</th><th>Leg ask product</th><th>Bid − product</th></tr></thead><tbody>${rows.slice(0,100).map(m=>`<tr class="click-row" data-market="${esc(marketKey(m))}"><td class="name"><button class="text-select" data-market="${esc(marketKey(m))}">${esc(m.title)}</button><small>${esc(m.venue)} · ${esc(m.id)}</small></td><td>${m.legs.length}</td><td>${number(m.openInterest)}</td><td>${number(f.volumePeriod==='24h'?m.volume24h:m.volume)}</td><td>${when(m.expirationForFilter)}</td><td>${px(m.bid)}</td><td>${px(m.ask)}</td><td>${px(m.product)}</td><td class="${sign(m.gap)}">${px(m.gap)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><strong>${s.catalog.markets.length?'No loaded combos match these filters':'Start with a market catalog'}</strong><p>${s.catalog.markets.length?(oi.total&&f.minOI>0?`None of the ${number(oi.total)} loaded combos passing your other filters meets minimum OI ${number(f.minOI)}. Highest reported OI in that group: ${number(oi.max)}. `:'No loaded combos pass your other filters. ')+(s.cursor?'Search more pages to continue; this is not a search of the entire exchange. ':'Review expiration, volume, search, and leg-count filters. ')+ 'Unknown OI is shown as — and cannot satisfy a positive minimum.':'Load synthetic examples to try the complete workflow, load public Kalshi markets, or import a catalog from either app.'}</p></div>`}
-  <div class="caption">${s.source==='kalshi'?`${s.pages} pages searched · ${s.cursor?'Partial results. Search more to continue.':'End of listing.'}`:'Prices in cents per $1 contract · Open interest and volume in contracts.'} ${f.sort==='openInterest'&&f.direction==='desc'?'Top 100 by open interest among loaded matches.':'Showing up to 100 matches in your selected order.'}
-  ${fold('diagnostics','Search details',`<p class="note" data-oi-diagnostics>Loaded combos: ${number(diagnostics.loaded.total)}; highest reported OI: ${number(diagnostics.loaded.max)}. After other filters: ${number(oi.total)} combos — ${number(oi.positive)} with positive OI, ${number(oi.zero)} with zero OI, ${number(oi.unknown)} unknown; highest OI: ${number(oi.max)}. OI is the combo’s own contract count. Set minimum OI to 0 for any value.</p><p class="note">Products use each required outcome’s ask. Missing or stale quotes show —. The leg product is a comparison benchmark, not an executable hedge cost.</p>${s.cursor?`<div class="actions gap-top">${button('more','Load next 200 markets',s.busy||s.auto)}</div>`:''}`)}</div></section>`;
+  ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Combo</th><th>Legs</th><th>Open interest</th><th>${f.volumePeriod==='24h'?'24h':'Total'} volume</th><th>Expiration · Denver</th><th>Bid</th><th>Ask</th><th>Leg ask product</th><th>Bid − product</th></tr></thead><tbody>${rows.slice(0,100).map(m=>`<tr class="click-row" data-market="${esc(marketKey(m))}"><td class="name"><button class="text-select" data-market="${esc(marketKey(m))}">${esc(m.title)}</button><small>${esc(m.venue)} · ${esc(m.id)}</small></td><td>${m.legs.length}</td><td>${number(m.openInterest)}</td><td>${number(f.volumePeriod==='24h'?m.volume24h:m.volume)}</td><td>${when(m.expirationForFilter)}</td><td>${px(m.bid)}</td><td>${px(m.ask)}</td><td>${px(m.product)}</td><td class="${sign(m.gap)}">${px(m.gap)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><strong>${s.catalog.markets.length?'No loaded combos match these filters':'Start with a market catalog'}</strong><p>${s.catalog.markets.length?(oi.total&&f.minOI>0?`None of the ${number(oi.total)} loaded combos passing your other filters meets minimum OI ${number(f.minOI)}. Highest reported OI in that group: ${number(oi.max)}. `:'No loaded combos pass your other filters. ')+(catalogFull()?'Catalog limit reached. Use Find with a full ticker to retrieve that market directly. ':s.cursor?'Search more pages to continue; this is not a search of the entire exchange. ':'Review expiration, volume, search, and leg-count filters. ')+ 'Unknown OI is shown as — and cannot satisfy a positive minimum.':'Load synthetic examples to try the complete workflow, load public Kalshi markets, or import a catalog from either app.'}</p></div>`}
+  <div class="caption">${s.source==='kalshi'?`${s.pages} pages searched · ${s.cursor?(catalogFull()?'Catalog limit reached. Use ticker lookup for a specific market.':'Partial results. Search more to continue.'):'End of listing.'}`:'Prices in cents per $1 contract · Open interest and volume in contracts.'} ${f.sort==='openInterest'&&f.direction==='desc'?'Top 100 by open interest among loaded matches.':'Showing up to 100 matches in your selected order.'}
+  ${fold('diagnostics','Search details',`<p class="note" data-oi-diagnostics>Loaded combos: ${number(diagnostics.loaded.total)}; highest reported OI: ${number(diagnostics.loaded.max)}. After other filters: ${number(oi.total)} combos — ${number(oi.positive)} with positive OI, ${number(oi.zero)} with zero OI, ${number(oi.unknown)} unknown; highest OI: ${number(oi.max)}. OI is the combo’s own contract count. Set minimum OI to 0 for any value.</p><p class="note">Products use each required outcome’s ask. Missing or stale quotes show —. The leg product is a comparison benchmark, not an executable hedge cost.</p>${s.cursor?`<div class="actions gap-top">${button('more','Load next 200 markets',s.busy||s.auto||catalogFull())}</div>`:''}`)}</div></section>`;
 }
 function optimizer(){
   const o=original();if(!o)return `<div class="empty"><strong>Select a combo in the scanner</strong><p>The leg editor, fresh quote comparison, and hedge scenarios appear here.</p>${button('go-scanner','Open scanner')}</div>`;
@@ -223,7 +219,10 @@ root.addEventListener('click',e=>{const el=e.target.closest('button,[data-market
   if(el.dataset.draftExport){download('combo-draft.json',s.drafts[Number(el.dataset.draftExport)]);return;}
   if(!action)return;
   const menu=el.closest('details.data-tools');if(menu)menu.open=false;
+  if(action==='lookup'){runLookup();return;}
+  if(['live','more','scan-pages'].includes(action)&&comboQuery(searchValue()).kind!=='text'){runLookup();return;}
   if(action==='dismiss-notice'){s.notice='';render();return;}
+  if(action==='kill')clearLookupTimer();
   if(action==='kill'&&s.busy){s.auto=false;stopRequested=true;requestAbort?.abort();s.notice='Stopping monitoring and cancelling pending paper orders…';render();return;}
   if(action==='paper'){try{previewPaper();}catch(e){s.error=e.message;render();}return;}
   if(action==='create-market'){creationDialog();return;}if(action==='rfq-original'||action==='rfq-hedge'){rfqDialog(action==='rfq-original'?original():selectedRow()?.candidate);return;}if(action==='manual-quote'){quoteDialog();return;}if(action==='review'){reviewDialog();return;}
@@ -249,7 +248,7 @@ root.addEventListener('click',e=>{const el=e.target.closest('button,[data-market
     if(action==='refresh')await refresh();
     if(action==='refresh-rfqs')await refreshRfqs();
     if(action==='cancel-rfq'){const id=el.dataset.rfq;await authFetch('/communications/rfqs/'+encodeURIComponent(id),'DELETE',null);s.rfqs=s.rfqs.filter(x=>x.id!==id);s.notice='RFQ cancelled.';}
-    if(action==='reset-filters')s.filters={...DEFAULT_FILTERS};
+    if(action==='reset-filters'){clearLookupTimer();s.lookupIds=[];s.filters={...DEFAULT_FILTERS};}
     if(action==='go-scanner')s.page='scanner';
     if(action==='compare-all'){s.custom=false;s.selectedVariant=null;}
     if(action==='compare-custom')s.custom=true;
@@ -261,9 +260,19 @@ root.addEventListener('click',e=>{const el=e.target.closest('button,[data-market
     if(action==='kill'){s.auto=false;await paperChange(cancelPending);s.notice='Stopped. Pending paper orders cancelled. Existing paper positions remain open.';}
   });
 });
-root.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.dataset.filter==='search'){e.preventDefault();s.filters={...s.filters,search:e.target.value.trim()};work(lookupTicker);}});
+root.addEventListener('input',e=>{
+  if(e.target.dataset.filter!=='search')return;
+  clearLookupTimer();s.filters={...s.filters,search:e.target.value.trim()};s.lookupIds=[];
+  const value=s.filters.search,{kind}=comboQuery(value);
+  // Only a resolvable ID auto-fetches; text and unknown suffixes never page-scan.
+  if(kind==='full'||(kind==='suffix'&&resolveComboTickers(value,tickerIndex).length)){
+    lookupTimer=window.setTimeout(()=>{lookupTimer=null;if(!disposed&&workspaceActive&&!s.busy&&searchValue()===value)runLookup();},450);
+  }
+});
+root.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.dataset.filter==='search'){e.preventDefault();runLookup();}});
 root.addEventListener('change',e=>{const el=e.target;try{
   if(el.id==='import-file'){const file=el.files?.[0];if(!file)return;work(async()=>{if(file.size>15000000)throw new Error('Maximum catalog size is 15 MB');const data=validateCatalog(JSON.parse(await file.text()));const updating=s.source==='import';if(!updating&&s.ledger.pending.length)await paperChange(cancelPending);s.auto=false;s.catalog={...data,markets:data.markets.map(m=>({...m,source:'import'}))};s.source='import';s.cursor=null;if(!updating||!original())s.selected=null;if(updating&&s.ledger.pending.length)await paperChange(current=>processPending(current,s.catalog));s.notice='Imported observations retain their timestamps. Imported quotes are not eligible for automatic paper execution.';});return;}
+  if(el.dataset.filter==='search'&&comboQuery(el.value).kind!=='text'){runLookup();return;}
   if(el.dataset.filter){if(el.dataset.filter==='search')s.lookupIds=[];const k=el.dataset.filter,n=['minOI','minVolume','hours','minLegs','maxLegs'].includes(k);if(n&&(el.value===''||!Number.isFinite(Number(el.value))))throw new Error('Enter a valid numeric filter');s.filters={...s.filters,[k]:n?Number(el.value):el.value};}
   if(el.dataset.limit){if(s.auto)return;const next={...s.limits,[el.dataset.limit]:el.value===''?NaN:Number(el.value)};validateLimits(next);s.limits=next;}
   if(el.dataset.keep){if(el.checked)s.keep.add(el.dataset.keep);else s.keep.delete(el.dataset.keep);s.custom=true;}
@@ -283,10 +292,10 @@ document.addEventListener('visibilitychange',onVisibility);
 const onStorage=e=>{if(e.key===storageKey){s.auto=false;try{s.ledger=validateLedger(JSON.parse(e.newValue));s.notice='Paper ledger changed in another tab; automatic monitoring paused.';}catch(error){s.storageError=true;s.error=error.message;}render();}};
 window.addEventListener('storage',onStorage);
 render();
-const dispose=()=>{disposed=true;s.auto=false;requestAbort?.abort();timers.forEach(window.clearInterval);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('storage',onStorage);dialog.remove();root.replaceChildren();};
+const dispose=()=>{clearLookupTimer();disposed=true;s.auto=false;requestAbort?.abort();timers.forEach(window.clearInterval);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('storage',onStorage);dialog.remove();root.replaceChildren();};
 dispose.setActive=active=>{
   workspaceActive=active;
-  if(!active){s.auto=false;if(s.busy){stopRequested=true;requestAbort?.abort();}if(dialog.open)dialog.close();s.notice='Workspace paused. Your scan and selected hedge are preserved.';}
+  if(!active){clearLookupTimer();s.auto=false;if(s.busy){stopRequested=true;requestAbort?.abort();}if(dialog.open)dialog.close();s.notice='Workspace paused. Your scan and selected hedge are preserved.';}
   render();
 };
 return dispose;

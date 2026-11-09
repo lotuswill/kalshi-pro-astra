@@ -209,3 +209,22 @@ Validation includes a successful reference-ticker lookup through the real local
 Vite proxy, plus simulated stalled fetch/body, fallback, cancellation and
 non-retryable HTTP errors. This does not establish the precise network failure
 on the user's Windows machine; the diagnostic command can verify that path.
+
+## Ticker input always uses direct lookup
+
+The scanner buttons previously ignored the full ticker entered in Search; only
+Enter invoked lookup. Full tickers and known suffixes now auto-fetch after a
+short input debounce, and a visible Find button provides the same operation.
+Load/Reload markets and pagination actions inspect the current input first and
+route ticker searches directly. Unknown suffixes request the full ticker instead
+of scanning pages. Exact lookup is independent of the discovery page/cap limit.
+
+Catalog-limit messages no longer suggest continuing a capped scan. Regression
+coverage asserts that paste, Find, Enter, Reload and Search more use the direct
+market endpoint without issuing any listing-page requests. Pausing, stopping or
+closing the workspace cancels the input debounce.
+
+The full-catalog regression loads 9,600 unrelated combos, confirms broad scanning
+stops, and then retrieves the reference via exactly one direct market request
+with no additional listing calls. Text matching now precedes leg-product work
+so a ticker search avoids pricing thousands of unrelated combos.

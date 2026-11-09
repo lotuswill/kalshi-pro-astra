@@ -22,6 +22,10 @@ globalThis.fetch=async(url,{signal}={})=>{
     listingCalls++;
     const cursor=new URL(url,'http://localhost').searchParams.get('cursor');
     const page=cursor?Number(cursor):0;
+    if(listingMode==='capacity'){
+      const base=raw(markets.find(m=>m.legs.length>1));
+      return {ok:true,json:async()=>({markets:Array.from({length:200},(_,i)=>({...base,ticker:`CAP-${page}-${i}`,title:'Capacity fixture',open_interest_fp:'0.00'})),cursor:String(page+1)})};
+    }
     if(listingMode==='ranked'){
       const base=raw(markets.find(m=>m.legs.length>1));
       return {ok:true,json:async()=>({markets:page===0?Array.from({length:120},(_,i)=>({...base,ticker:`RANK-${i+1}`,open_interest_fp:String(i+1)})):[{...base,ticker:'LATER-HIGH',open_interest_fp:'9999'}],cursor:page===0?'1':null})};
@@ -90,7 +94,7 @@ assert.equal(shadow.querySelectorAll('tbody tr').length,0,'Lookup should be visi
 assert.ok(JSON.parse(localStorage.getItem('kalshi-astra-combo-tickers-v1:test')).includes(referenceTicker));
 click(`button[data-market="kalshi:${referenceTicker}"]`);assert.equal(shadow.querySelectorAll('[data-keep]').length,17);
 click('[data-page="scanner"]');await findTicker(referenceTicker.toLowerCase());assert.equal(directCalls,2);
-listingMode='zero';listingCalls=0;await findTicker('UNKNOWN99');assert.equal(listingCalls,20);assert.match(root.textContent,/not an exchange-wide suffix index/);
+listingMode='zero';listingCalls=0;await findTicker('UNKNOWN99');assert.equal(listingCalls,0);assert.match(root.textContent,/No market pages were scanned/);
 networkFail=true;
 const failedInput=$('[data-filter="search"]');failedInput.value=referenceTicker;failedInput.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
 for(let i=0;i<25;i++)await new Promise(r=>setTimeout(r,0));
@@ -98,6 +102,29 @@ assert.match($('[role="alert"]').textContent,/Cannot reach Kalshi.*EAI_AGAIN/);
 assert.ok(!root.textContent.includes('WORKING…'),'Failed lookup must release the busy state');
 assert.equal($('[role="status"]'),null,'Stale lookup progress must be cleared after failure');
 networkFail=false;await findTicker(referenceTicker);assert.match(root.textContent,/Direct ticker match/);
+// Pasting, clicking Find and even the old scanner buttons must bypass pagination.
+const beforeListing=listingCalls;
+for(const value of [referenceTicker,'EGY4ZTQ7G']){
+  const before=directCalls,input=$('[data-filter="search"]');input.value=value;
+  input.dispatchEvent(new w.Event('input',{bubbles:true}));
+  await new Promise(r=>setTimeout(r,500));await idle();
+  assert.equal(directCalls,before+1,'Typing/pasting a complete ID auto-fetches it');
+  assert.equal(listingCalls,beforeListing,'Exact lookup must not scan pages');
+}
+for(const action of ['lookup','live','scan-pages']){
+  const before=directCalls;const input=$('[data-filter="search"]');input.value=referenceTicker;
+  // Keep the pre-render scanner button present to model clicking just after pasting.
+  let b=$(`[data-action="${action}"]`);
+  if(!b){b=w.document.createElement('button');b.dataset.action=action;root.append(b);}
+  b.click();await idle();assert.equal(directCalls,before+1);assert.equal(listingCalls,beforeListing);
+}
+// Reproduce a full scanner catalog, then fetch the exact ticker without another page.
+listingMode='capacity';listingCalls=0;
+const broad=$('[data-filter="search"]');broad.value='no matching title';broad.dispatchEvent(new w.Event('change',{bubbles:true}));
+click('[data-action="live"]');await idle();click('[data-action="scan-pages"]');await idle();click('[data-action="scan-pages"]');await idle();
+assert.equal(listingCalls,48);assert.match(root.textContent,/Local catalog limit reached/);assert.equal($('[data-action="scan-pages"]').disabled,true);
+const beforeCapacityLookup=directCalls;await findTicker(referenceTicker);
+assert.equal(directCalls,beforeCapacityLookup+1);assert.equal(listingCalls,48);assert.match(root.textContent,/Direct ticker match/);assert.match(root.textContent,/9,601 combos loaded/);
 assert.ok(writes.every(r=>!r.path.includes('/orders')&&!r.path.includes('/accept')));
 dispose();assert.equal(intervals.size,0);assert.equal(root.children.length,0);assert.equal(shadow.querySelector('dialog'),null);
 dom.window.close();console.log('Integrated shadow-DOM workflow passed: scanner, paper lifecycle, explicit create/RFQ approvals, cancel, Stop, and unmount cleanup.');

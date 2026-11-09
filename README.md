@@ -93,7 +93,7 @@ Sports feeds, trackers and sportsbook fetches do not start in the combo workspac
 
 ### Finding a specific combo
 
-Paste its full ticker in Search and press Enter. Direct lookup fetches the exact
+Paste its full ticker in Search. Complete tickers look up automatically; Find or Enter also works. Direct lookup fetches the exact
 market and displays it separately from the filtered top-100 table, even when
 OI, expiration, status or leg-count filters exclude it. Select the result to
 inspect its legs, then refresh the books for executable prices.
@@ -102,8 +102,7 @@ Nine-character suffixes also work for previously seen or looked-up tickers.
 The user-supplied reference `KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G`
 is included in the reference list, so `EGY4ZTQ7G` resolves on a fresh install.
 Only ticker IDs are remembered; full lookups always fetch fresh metadata.
-Unknown suffixes search up to 20 more listing pages; paste the full ticker if
-that partial search misses it. Ambiguous suffixes require choosing a full ID.
+Unknown suffixes ask for the full ticker; they do not start a page scan. Ambiguous suffixes require choosing a full ID.
 
 Discovery and leg editing support up to 32 legs (previously 12). Optimization
 remains bounded to 128 candidates; full scenario enumeration remains limited
@@ -125,3 +124,9 @@ proxy, transport and reference combo normalization. It starts its own temporary
 loopback server on an available port, prints status and timing without keys or
 proxy credentials, and closes on completion. Optionally pass a full ticker:
 `npm run diagnose:kalshi -- KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G`.
+
+Ticker lookup is independent of scanner pagination and catalog capacity. When
+a full ticker or suffix is entered, Load/Reload markets and Search more also
+route to lookup instead of loading pages. Text searches still filter the loaded
+catalog. The 9,600-instrument discovery cap applies only to broad scanning;
+it does not prevent a direct lookup from using the reserved catalog space.

@@ -68,12 +68,12 @@ export function expirationFor(m,catalog,basis='combo') {
 export function scan(catalog,options={},now=Date.now()) {
   const f={...DEFAULT_FILTERS,...options};
   for(const k of ['minOI','minVolume','hours','minLegs','maxLegs'])if(!finite(f[k])||f[k]<0)throw new Error('Filters must be finite nonnegative numbers');
-  const rows=catalog.markets.filter(m=>m.legs.length>=Math.max(2,f.minLegs)&&m.legs.length<=f.maxLegs).map(m=>{
+  const rows=catalog.markets.filter(m=>m.legs.length>=Math.max(2,f.minLegs)&&m.legs.length<=f.maxLegs&&`${m.title} ${m.id} ${m.legs.map(l=>l.title||l.marketId).join(' ')}`.toLowerCase().includes(f.search.trim().toLowerCase())).map(m=>{
     const product=legProduct(m,catalog,'ask',{now});
     return {...m,product,gap:unit(m.bid)&&isFresh(m,now)&&product!==null?m.bid-product:null,expirationForFilter:expirationFor(m,catalog,f.expiryBasis)};
   }).filter(m=>{
     const vol=f.volumePeriod==='24h'?m.volume24h:m.volume;
-    return (f.venue==='all'||m.venue===f.venue)&&['open','active'].includes(m.status)&&(!m.closeAt||m.closeAt>now)&&(f.minOI===0||(finite(m.openInterest)&&m.openInterest>=f.minOI))&&(f.minVolume===0||(finite(vol)&&vol>=f.minVolume))&&positive(m.expirationForFilter)&&m.expirationForFilter>now&&m.expirationForFilter<=now+f.hours*3600000&&`${m.title} ${m.id} ${m.legs.map(l=>l.title||l.marketId).join(' ')}`.toLowerCase().includes(f.search.trim().toLowerCase());
+    return (f.venue==='all'||m.venue===f.venue)&&['open','active'].includes(m.status)&&(!m.closeAt||m.closeAt>now)&&(f.minOI===0||(finite(m.openInterest)&&m.openInterest>=f.minOI))&&(f.minVolume===0||(finite(vol)&&vol>=f.minVolume))&&positive(m.expirationForFilter)&&m.expirationForFilter>now&&m.expirationForFilter<=now+f.hours*3600000;
   });
   const fields={expiration:'expirationForFilter',openInterest:'openInterest',volume:f.volumePeriod==='24h'?'volume24h':'volume',gap:'gap',bid:'bid',ask:'ask',legs:'legs'};
   const key=fields[f.sort]||'expirationForFilter';
