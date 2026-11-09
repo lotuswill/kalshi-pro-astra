@@ -20,7 +20,7 @@ test('combo workspace starts focused, preserves research across account views, a
     expect(shadow.querySelector('.sidebar')).toBeNull();
     expect(shadow.querySelector('[data-disclosure="filters"]').open).toBe(false);
     await act(async () => shadow.querySelector('[data-action="sample"]').click());
-    expect(shadow.querySelectorAll('tbody tr')).toHaveLength(5);
+    expect(shadow.querySelectorAll('tbody tr')).toHaveLength(6);
     const filters = shadow.querySelector('[data-disclosure="filters"]'); filters.open = true;
     const sort = shadow.querySelector('[data-filter="sort"]'); sort.value = 'openInterest';
     await act(async () => sort.dispatchEvent(new Event('change', { bubbles: true })));
@@ -30,7 +30,7 @@ test('combo workspace starts focused, preserves research across account views, a
     expect(host.querySelector('[aria-label="Combo workspace"]').hidden).toBe(true);
     expect(connection).toHaveBeenCalled(); expect(otherTools).not.toHaveBeenCalled();
     await click('Combos');
-    expect(shadow.querySelectorAll('tbody tr')).toHaveLength(5);
+    expect(shadow.querySelectorAll('tbody tr')).toHaveLength(6);
     expect(shadow.querySelector('[data-filter="sort"]').value).toBe('openInterest');
     expect(shadow.querySelector('[data-disclosure="filters"]').open).toBe(true);
     await act(async () => shadow.querySelector('button[data-market="kalshi:DEMO-ABCD"]').click());

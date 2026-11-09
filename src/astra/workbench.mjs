@@ -62,7 +62,7 @@ async function refresh(){
   if(!stopRequested&&s.ledger.pending.length)await paperChange(current=>processPending(current,s.catalog));
 }
 // Search a bounded batch instead of treating the first (often zero-OI) page as the market.
-async function discover(maxPages,targetMatches){
+async function discover(maxPages){
   let reason='Page budget reached';
   const seen=new Set();
   for(let page=0;page<maxPages&&!stopRequested&&!disposed;page++){
@@ -77,7 +77,6 @@ async function discover(maxPages,targetMatches){
     s.notice=`Searching: ${s.pages} pages loaded, ${matches} matches. Stop keeps loaded results.${result.warnings?.length?` ${result.warnings.length} unsupported records skipped on this page.`:''}`;
     render();
     if(!s.cursor){reason='End of listing reached';break;}
-    if(matches>=targetMatches){reason='Matching batch found';break;}
   }
   if(!stopRequested)s.notice=`${reason}. ${s.pages} pages loaded; ${scan(s.catalog,s.filters).length} matches. ${s.cursor?'Search more pages to continue. Results are not exchange-wide.':''} Listing quotes require a book refresh.`;
 }
@@ -94,9 +93,9 @@ function scanner(){
   <section class="panel scanner-panel">
   <fieldset class="filter-fields" ${s.busy?'disabled':''}><div class="filters"><label class="field">Search<input data-filter="search" value="${esc(f.search)}" placeholder="Title, ticker, or leg"></label><label class="field">Minimum open interest<input data-filter="minOI" type="number" min="0" value="${f.minOI}"></label><label class="field">Expires within (hours)<input data-filter="hours" type="number" min="1" value="${f.hours}"></label><label class="field">Minimum volume<input data-filter="minVolume" type="number" min="0" value="${f.minVolume}"></label><label class="field">Sort by<select data-filter="sort">${opts([['expiration','First expiration'],['openInterest','Open interest'],['volume','Volume'],['gap','Bid − leg ask product'],['bid','Combo bid'],['ask','Combo ask'],['legs','Leg count']],f.sort)}</select></label></div>
   ${fold('filters',`More filters${advancedCount?` · ${advancedCount} changed`:''}`,advanced,'filter-disclosure')}</fieldset>
-  <div class="results-bar"><strong>${number(rows.length)} matches</strong><span>${number(diagnostics.loaded.total)} combos loaded</span><span>Highest OI: ${number(diagnostics.loaded.max)}</span>${badge(s.source==='sample'?'SYNTHETIC':s.source==='kalshi'?'KALSHI':s.source==='import'?'IMPORTED':'NO DATA',s.source==='sample'?'amber':'')}</div>
-  ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Combo</th><th>Legs</th><th>Open interest</th><th>${f.volumePeriod==='24h'?'24h':'Total'} volume</th><th>Expiration · Denver</th><th>Bid</th><th>Ask</th><th>Leg ask product</th><th>Bid − product</th></tr></thead><tbody>${rows.slice(0,300).map(m=>`<tr class="click-row" data-market="${esc(marketKey(m))}"><td class="name"><button class="text-select" data-market="${esc(marketKey(m))}">${esc(m.title)}</button><small>${esc(m.venue)} · ${esc(m.id)}</small></td><td>${m.legs.length}</td><td>${number(m.openInterest)}</td><td>${number(f.volumePeriod==='24h'?m.volume24h:m.volume)}</td><td>${when(m.expirationForFilter)}</td><td>${px(m.bid)}</td><td>${px(m.ask)}</td><td>${px(m.product)}</td><td class="${sign(m.gap)}">${px(m.gap)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><strong>${s.catalog.markets.length?'No loaded combos match these filters':'Start with a market catalog'}</strong><p>${s.catalog.markets.length?(oi.total&&f.minOI>0?`None of the ${number(oi.total)} loaded combos passing your other filters meets minimum OI ${number(f.minOI)}. Highest reported OI in that group: ${number(oi.max)}. `:'No loaded combos pass your other filters. ')+(s.cursor?'Search more pages to continue; this is not a search of the entire exchange. ':'Review expiration, volume, search, and leg-count filters. ')+ 'Unknown OI is shown as — and cannot satisfy a positive minimum.':'Load synthetic examples to try the complete workflow, load public Kalshi markets, or import a catalog from either app.'}</p></div>`}
-  <div class="caption">${s.source==='kalshi'?`${s.pages} pages searched · ${s.cursor?'Partial results. Search more to continue.':'End of listing.'}`:'Prices in cents per $1 contract · Open interest and volume in contracts.'} ${rows.length>300?'Showing the first 300 matches. Narrow your filters.':''}
+  <div class="results-bar"><strong>Showing ${number(Math.min(100,rows.length))} of ${number(rows.length)} matches</strong><span>${number(diagnostics.loaded.total)} combos loaded</span><span>Highest OI: ${number(diagnostics.loaded.max)}</span>${badge(s.source==='sample'?'SYNTHETIC':s.source==='kalshi'?'KALSHI':s.source==='import'?'IMPORTED':'NO DATA',s.source==='sample'?'amber':'')}</div>
+  ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Combo</th><th>Legs</th><th>Open interest</th><th>${f.volumePeriod==='24h'?'24h':'Total'} volume</th><th>Expiration · Denver</th><th>Bid</th><th>Ask</th><th>Leg ask product</th><th>Bid − product</th></tr></thead><tbody>${rows.slice(0,100).map(m=>`<tr class="click-row" data-market="${esc(marketKey(m))}"><td class="name"><button class="text-select" data-market="${esc(marketKey(m))}">${esc(m.title)}</button><small>${esc(m.venue)} · ${esc(m.id)}</small></td><td>${m.legs.length}</td><td>${number(m.openInterest)}</td><td>${number(f.volumePeriod==='24h'?m.volume24h:m.volume)}</td><td>${when(m.expirationForFilter)}</td><td>${px(m.bid)}</td><td>${px(m.ask)}</td><td>${px(m.product)}</td><td class="${sign(m.gap)}">${px(m.gap)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><strong>${s.catalog.markets.length?'No loaded combos match these filters':'Start with a market catalog'}</strong><p>${s.catalog.markets.length?(oi.total&&f.minOI>0?`None of the ${number(oi.total)} loaded combos passing your other filters meets minimum OI ${number(f.minOI)}. Highest reported OI in that group: ${number(oi.max)}. `:'No loaded combos pass your other filters. ')+(s.cursor?'Search more pages to continue; this is not a search of the entire exchange. ':'Review expiration, volume, search, and leg-count filters. ')+ 'Unknown OI is shown as — and cannot satisfy a positive minimum.':'Load synthetic examples to try the complete workflow, load public Kalshi markets, or import a catalog from either app.'}</p></div>`}
+  <div class="caption">${s.source==='kalshi'?`${s.pages} pages searched · ${s.cursor?'Partial results. Search more to continue.':'End of listing.'}`:'Prices in cents per $1 contract · Open interest and volume in contracts.'} ${f.sort==='openInterest'&&f.direction==='desc'?'Top 100 by open interest among loaded matches.':'Showing up to 100 matches in your selected order.'}
   ${fold('diagnostics','Search details',`<p class="note" data-oi-diagnostics>Loaded combos: ${number(diagnostics.loaded.total)}; highest reported OI: ${number(diagnostics.loaded.max)}. After other filters: ${number(oi.total)} combos — ${number(oi.positive)} with positive OI, ${number(oi.zero)} with zero OI, ${number(oi.unknown)} unknown; highest OI: ${number(oi.max)}. OI is the combo’s own contract count. Set minimum OI to 0 for any value.</p><p class="note">Products use each required outcome’s ask. Missing or stale quotes show —. The leg product is a comparison benchmark, not an executable hedge cost.</p>${s.cursor?`<div class="actions gap-top">${button('more','Load next 200 markets',s.busy||s.auto)}</div>`:''}`)}</div></section>`;
 }
 function optimizer(){
@@ -191,11 +190,11 @@ root.addEventListener('click',e=>{const el=e.target.closest('button,[data-market
     if(action==='live'){
       s.auto=false;if(s.ledger.pending.length)await paperChange(cancelPending);
       s.catalog={version:1,markets:[]};s.cursor=null;s.pages=0;s.selected=null;s.source='kalshi';
-      await discover(20,20);
+      await discover(20);
     }
     if(action==='more'||action==='scan-pages'){
       if(s.source!=='kalshi'||!s.cursor)throw new Error('No more live pages available');
-      await discover(action==='more'?1:20,scan(s.catalog,s.filters).length+20);
+      await discover(action==='more'?1:20);
     }
     if(action==='price-visible'){
       const targets=scan(s.catalog,{...s.filters,expiryBasis:'combo'}).slice(0,20);

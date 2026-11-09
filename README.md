@@ -40,12 +40,14 @@ Astra server before running the default update-and-start flow.
 Unlock/create your local Key Vault, open **Combos**, and choose **Load synthetic
 examples** for a complete walkthrough without sending exchange requests.
 Choose **Load Kalshi markets** for real public listings, load more pages, then
-**Price first 20 matches** or select a combo and refresh its books.
+**Refresh match prices** (first 20 matches) or select a combo and refresh its books.
 
 ## Combos
 
-Defaults: OI **100,000+**, expiry **within 72 hours**, **earliest expiration
-first**. Search/filter volume and leg count; sort by bid minus required-leg ask
+Defaults: OI **1+**, expiry **within 72 hours**, **highest open interest first**,
+showing up to **100 combos** from loaded matches. Each search batch reads up to
+20 pages, even if 100 matches appear sooner; Search more extends the ranking.
+This is a ranking of loaded markets, not an exchange-wide top 100. Search/filter volume and leg count; sort by bid minus required-leg ask
 product. Both bid and ask stay visible. Unknown prices remain unknown.
 
 Remove legs or pin the ones to retain, compare costs and price changes, save a

@@ -16,6 +16,10 @@ globalThis.fetch=async(url,{signal}={})=>{
     listingCalls++;
     const cursor=new URL(url,'http://localhost').searchParams.get('cursor');
     const page=cursor?Number(cursor):0;
+    if(listingMode==='ranked'){
+      const base=raw(markets.find(m=>m.legs.length>1));
+      return {ok:true,json:async()=>({markets:page===0?Array.from({length:120},(_,i)=>({...base,ticker:`RANK-${i+1}`,open_interest_fp:String(i+1)})):[{...base,ticker:'LATER-HIGH',open_interest_fp:'9999'}],cursor:page===0?'1':null})};
+    }
     if(listingMode==='zero'||listingMode==='repeat'||page<2)return {ok:true,json:async()=>({markets:markets.filter(m=>m.legs.length>1).map(m=>({...raw(m),ticker:`ZERO-${page}-${m.id}`,open_interest_fp:'0.00'})),cursor:listingMode==='repeat'?'1':String(page+1)})};
     assert.equal(page,2,'Must follow opaque listing cursors through the zero-OI pages');
     return {ok:true,json:async()=>({markets:markets.filter(m=>m.legs.length>1).map(raw),cursor:null})};
@@ -37,8 +41,8 @@ const dispose=mountWorkbench(root,{apiBase:'/kalshi/trade-api/v2',authFetch,prof
 const $=x=>shadow.querySelector(x),click=x=>{assert.ok($(x),'Missing '+x);$(x).click();};
 const idle=async()=>{for(let i=0;i<25;i++)await new Promise(r=>setTimeout(r,0));assert.equal($('[role="alert"]'),null,$('[role="alert"]')?.textContent);};
 const submit=()=>$('dialog form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
-assert.equal($('[data-filter="minOI"]').value,'100000');assert.equal($('[data-filter="hours"]').value,'72');
-click('[data-action="sample"]');await idle();assert.equal(shadow.querySelectorAll('tbody tr').length,5);
+assert.equal($('[data-filter="minOI"]').value,'1');assert.equal($('[data-filter="hours"]').value,'72');
+click('[data-action="sample"]');await idle();assert.equal(shadow.querySelectorAll('tbody tr').length,6);
 click('button[data-market="kalshi:DEMO-ABCD"]');assert.match(root.textContent,/PAPER CHECKS PASS/);
 click('[data-action="draft"]');await idle();assert.equal(JSON.parse(localStorage.getItem('kalshi-astra-combo-drafts-v1:test')).length,1);
 click('[data-action="paper"]');submit();await idle();assert.equal(JSON.parse(localStorage.getItem('kalshi-astra-combo-paper-v1:test')).pending.length,1);
@@ -46,7 +50,7 @@ click('[data-action="refresh"]');await idle();assert.equal(JSON.parse(localStora
 click('[data-page="paper"]');click('[data-settle]');for(const input of shadow.querySelectorAll('dialog input'))input.value='1';submit();await idle();assert.equal(JSON.parse(localStorage.getItem('kalshi-astra-combo-paper-v1:test')).positions[0].status,'settled');
 click('[data-page="scanner"]');click('[data-action="live"]');await idle();
 assert.equal(listingCalls,3,'Initial load must search past zero-OI pages');
-assert.equal(shadow.querySelectorAll('tbody tr').length,5);
+assert.equal(shadow.querySelectorAll('tbody tr').length,6);
 assert.match($('[data-oi-diagnostics]').textContent,/12 with zero OI/);
 const filter=value=>{const input=$('[data-filter="minOI"]');input.value=String(value);input.dispatchEvent(new w.Event('change',{bubbles:true}));};
 for(const [min,count] of [[1,6],[10,6],[100000,5]]){filter(min);assert.equal(shadow.querySelectorAll('tbody tr').length,count);}
@@ -65,6 +69,13 @@ click('[data-action="scan-pages"]');await idle();assert.equal(listingCalls,40,'C
 listingMode='repeat';listingCalls=0;click('[data-action="live"]');
 for(let i=0;i<25;i++)await new Promise(r=>setTimeout(r,0));
 assert.match($('[role="alert"]').textContent,/repeated a pagination cursor/);assert.equal(listingCalls,2);
+listingMode='ranked';listingCalls=0;click('[data-action="reset-filters"]');await idle();
+assert.equal($('[data-filter="sort"]').value,'openInterest');assert.equal($('[data-filter="direction"]').value,'desc');assert.equal($('[data-filter="minOI"]').value,'1');
+click('[data-action="live"]');await idle();assert.equal(listingCalls,2,'Continue beyond the first 100 matches');
+assert.equal(shadow.querySelectorAll('tbody tr').length,100);
+assert.equal($('tbody tr').dataset.market,'kalshi:LATER-HIGH');
+assert.equal([...shadow.querySelectorAll('tbody tr')].at(-1).dataset.market,'kalshi:RANK-22');
+assert.match(root.textContent,/Showing 100 of 121 matches/);
 hang=true;click('[data-action="live"]');await new Promise(r=>setTimeout(r,0));assert.equal($('[data-action="kill"]').disabled,false);click('[data-action="kill"]');await idle();hang=false;
 assert.ok(writes.every(r=>!r.path.includes('/orders')&&!r.path.includes('/accept')));
 dispose();assert.equal(intervals.size,0);assert.equal(root.children.length,0);assert.equal(shadow.querySelector('dialog'),null);

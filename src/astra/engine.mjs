@@ -1,4 +1,4 @@
-export const DEFAULT_FILTERS = Object.freeze({ minOI:100000, minVolume:0, volumePeriod:'total', hours:72, expiryBasis:'combo', minLegs:2, maxLegs:12, search:'', venue:'all', sort:'expiration', direction:'asc' });
+export const DEFAULT_FILTERS = Object.freeze({ minOI:1, minVolume:0, volumePeriod:'total', hours:72, expiryBasis:'combo', minLegs:2, maxLegs:12, search:'', venue:'all', sort:'openInterest', direction:'desc' });
 export const DEFAULT_LIMITS = Object.freeze({ quantity:10, maxQuoteAgeSec:30, maxQuoteSkewSec:10, maxSpread:0.10, maxCapital:100, maxTotalCapital:500, maxPerUnderlying:200, minWorstPnl:0, maxDailyLoss:50, slippage:0.005 });
 export const num = x => x === null || x === undefined || x === '' || typeof x === 'boolean' ? null : Number.isFinite(Number(x)) ? Number(x) : null;
 export const unit = x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;

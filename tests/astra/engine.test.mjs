@@ -9,10 +9,10 @@ const setup=()=>{const catalog=sample(now),original=catalog.markets.find(m=>m.id
 const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-9,`${a} != ${b}`);
 function rowFor(x){return E.optimize(x.original,x.catalog,{},x.limits,now).rows.find(r=>r.candidate?.id==='DEMO-ABD');}
 
-test('default scanner filters OI, expiration and orders earliest first',()=>{
+test('default scanner filters positive OI and expiration, ranking highest OI first',()=>{
   const {catalog}=setup();E.validateCatalog(catalog);const rows=E.scan(catalog,{},now);
-  assert.equal(rows.length,10);assert.ok(rows.every(m=>m.openInterest>=100000));
-  assert.ok(rows.every((m,i)=>!i||m.expiration>=rows[i-1].expiration));
+  assert.equal(rows.length,12);assert.ok(rows.every(m=>m.openInterest>=1));
+  assert.ok(rows.every((m,i)=>!i||m.openInterest<=rows[i-1].openInterest));
   const m=catalog.markets.find(m=>m.id==='DEMO-ABCD');m.openInterest=100000;m.expiration=now+72*3600000;
   assert.ok(E.scan(catalog,{},now).some(r=>r===m||r.id===m.id&&r.venue===m.venue));
   m.expiration++;assert.ok(!E.scan(catalog,{},now).some(r=>r.id===m.id&&r.venue===m.venue));

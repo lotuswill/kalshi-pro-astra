@@ -12,8 +12,8 @@ The Astra page uses explicit bid/ask quotes for the requested sell-original /
 buy-reduced-combination analysis. Other terminal modules retain their inherited
 behavior; this is not a rewrite of their valuation or live-order logic.
 
-- Defaults: minimum OI 100,000 contracts, future expiration within 72 hours,
-  earliest combo expiration first. Search title/ticker/legs; filter volume,
+- Defaults: minimum OI 1 contract, future expiration within 72 hours,
+  highest combo open interest first, showing the top 100 loaded matches. Search title/ticker/legs; filter volume,
   24-hour volume, venue, max legs, and optionally first-leg expiration.
 - Separate original bid and ask; required-outcome leg ask product; sortable
   original bid minus product. Zero and unknown stay distinct. No midpoint or
@@ -123,7 +123,7 @@ The DOM test verifies behavior, not browser layout or Windows installation.
 The live listing can begin with hundreds of newly created combos reporting
 `open_interest_fp: "0.00"`. Loading only its first page made every positive OI
 minimum appear broken. Load Kalshi markets now follows up to 20 pages (200
-records each), stopping early at 20 matches or end of listing. Search more
+records each), stopping early only at end of listing. Search more
 continues from the cursor for another bounded batch. Stop interrupts requests.
 The catalog keeps room for leg-book refreshes and stops discovery before its
 10,000-instrument limit; repeated cursors are rejected. Filters are fixed while
@@ -155,3 +155,15 @@ pages and positive OI on later pages; no account or order endpoint was used.
 - Extend `npm run test:ui` with the React shell regression: no default network
   requests, deferred sports-tool mounting, preserved filters/catalog, disclosure
   state, and automatic paper pause across account navigation.
+
+## Top 100 default
+
+Minimum combo OI is now 1 contract. The default ordering is open interest,
+descending, with up to 100 rows shown after applying all filters. The 72-hour
+expiration window remains. Each discovery batch scans its full page budget even
+when 100 matches have already been found, so later pages can improve the ranking.
+The matching count includes all loaded matches; the visible table is capped at
+100. Search more continues discovery and reranks the list. Partial coverage is
+explicit; this is not an exchange-wide top-100 index. Reset defaults restores
+these settings. Regression coverage includes a higher-OI combo on a later page
+replacing an earlier result after the first page already had 120 matches.
