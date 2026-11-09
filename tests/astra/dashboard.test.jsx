@@ -2,6 +2,27 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { test, expect, vi } from 'vitest';
 import { ComboDashboard } from '../../src/ComboDashboard.jsx';
+import { ToolNavigation } from '../../src/ToolNavigation.jsx';
+
+test('terminal keeps Key Vault visible and secondary tools reachable through a selector', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div'); document.body.append(host);
+  const app = createRoot(host), select = vi.fn();
+  try {
+    const items = ['combos', 'positions', 'vault', 'odds', 'settings', 'trade'].map(id => ({ id }));
+    await act(async () => app.render(<ToolNavigation items={items} active="vault" onSelect={select} />));
+    expect([...host.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Combos', 'Positions', 'Key Vault']);
+    expect(host.querySelector('[aria-current="page"]').textContent).toBe('Key Vault');
+    await act(async () => host.querySelector('[aria-current="page"]').click());
+    expect(select).toHaveBeenLastCalledWith('vault');
+    const selector = host.querySelector('select');
+    for (const value of ['odds', 'settings', 'trade']) {
+      expect([...selector.options].some(option => option.value === value)).toBe(true);
+      await act(async () => { selector.value = value; selector.dispatchEvent(new Event('change', { bubbles: true })); });
+      expect(select).toHaveBeenLastCalledWith(value);
+    }
+  } finally { await act(async () => app.unmount()); host.remove(); }
+});
 
 test('combo workspace starts focused, preserves research across account views, and opens other tools only on demand', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,7 +47,7 @@ test('combo workspace starts focused, preserves research across account views, a
     await act(async () => sort.dispatchEvent(new Event('change', { bubbles: true })));
     expect(shadow.querySelector('[data-disclosure="filters"]').open).toBe(true);
     const click = async label => act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === label).click());
-    await click('Connection');
+    await click('Key Vault');
     expect(host.querySelector('[aria-label="Combo workspace"]').hidden).toBe(true);
     expect(connection).toHaveBeenCalled(); expect(otherTools).not.toHaveBeenCalled();
     await click('Combos');
@@ -42,6 +63,8 @@ test('combo workspace starts focused, preserves research across account views, a
     expect(shadow.textContent).not.toContain('AUTO PAPER ACTIVE');
     expect(shadow.querySelector('[data-action="auto"]').textContent).toBe('Enable automatic paper');
     await click('Other tools'); expect(otherTools).toHaveBeenCalledTimes(1);
+    await click('Key Vault'); expect(host.querySelector('[aria-label="Key Vault settings"]')).not.toBeNull();
+    await click('Other tools');
     await click('Back to combos'); expect(shadow.querySelector('[data-page="paper"]').getAttribute('aria-current')).toBe('page');
     expect(fetcher).not.toHaveBeenCalled();
   } finally {

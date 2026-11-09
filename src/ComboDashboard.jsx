@@ -9,7 +9,7 @@ export function ComboDashboard({ profile, connected, onLock, apiBase, authFetch,
     <header className="workspace-header">
       <div className="workspace-brand">KALSHI <span>ASTRA</span></div>
       <nav aria-label="Workspace">
-        {[['combos', 'Combos'], ['positions', 'Live positions'], ['connection', 'Connection']].map(([id, label]) =>
+        {[['combos', 'Combos'], ['positions', 'Live positions'], ['connection', 'Key Vault']].map(([id, label]) =>
           <button key={id} aria-current={view === id ? 'page' : undefined} onClick={() => setView(id)}>{label}</button>)}
       </nav>
       <div className="workspace-account">
@@ -24,7 +24,7 @@ export function ComboDashboard({ profile, connected, onLock, apiBase, authFetch,
       <section className="workspace-view" hidden={view !== 'combos'} aria-label="Combo workspace">
         <CombosModule profile={profile} apiBase={apiBase} authFetch={authFetch} active={view === 'combos'} />
       </section>
-      {view === 'connection' && <section className="workspace-view" aria-label="Connection settings">{connection()}</section>}
+      {view === 'connection' && <section className="workspace-view" aria-label="Key Vault settings">{connection()}</section>}
       {view === 'positions' && <section className="workspace-view" aria-label="Live account positions">{positions()}</section>}
       {view === 'tools' && <section className="workspace-view" aria-label="Other tools">
         <div className="tools-return"><button onClick={() => setView('combos')}>Back to combos</button><span>Sports terminal · live trading controls</span></div>

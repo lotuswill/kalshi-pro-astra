@@ -228,3 +228,13 @@ The full-catalog regression loads 9,600 unrelated combos, confirms broad scannin
 stops, and then retrieves the reference via exactly one direct market request
 with no additional listing calls. Text matching now precedes leg-product work
 so a ticker search avoids pricing thousands of unrelated combos.
+
+## Reachable Key Vault and shorter navigation
+
+The main Connection tab is now labeled Key Vault. In Other tools, the long
+icon rail is replaced with three labeled buttons (Combos, Positions, Key Vault)
+and a selector for secondary tools. The navigation can scroll on short screens;
+the vault no longer sits below 19 other icons. The vault's data-source overview
+is collapsed by default so the Kalshi credential fields are easier to reach,
+and its header wraps on narrow screens. Existing encrypted storage and saving
+behavior are unchanged.

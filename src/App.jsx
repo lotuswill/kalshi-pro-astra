@@ -3,6 +3,7 @@ import { mlToProb, kalshiFee, kalshiFeeCents, calcArbProfit } from "./engine/fee
 import { FeedbackModule, sessionTracker } from "./Feedback.jsx";
 import { PostponedModule } from "./Postponed.jsx";
 import { CombosModule } from "./Combos.jsx";
+import { ToolNavigation } from "./ToolNavigation.jsx";
 import { ComboDashboard } from "./ComboDashboard.jsx";
 import { TicketModule } from "./Ticket.jsx";
 import { PositionsModule } from "./Positions.jsx";
@@ -1271,8 +1272,8 @@ function VaultPage() {
   ];
 
   return (
-    <div style={{ ...S.panel, height: "100%" }}>
-      <div style={S.hdr}>
+    <div style={{ ...S.panel, height: "100%", minHeight: 0 }}>
+      <div style={{ ...S.hdr, flexWrap: "wrap", gap: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={S.title}>🔐 Key Vault</span><HelpTip id="vault" />
           <Badge c="#00e8a4" glow>{Object.values(vault.keys).filter(Boolean).length} KEYS</Badge>
@@ -1285,7 +1286,8 @@ function VaultPage() {
         </div>
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 18 }}>
-        {/* Sources */}
+        <details style={{ marginBottom: 16 }}>
+          <summary style={{ cursor: "pointer", color: "#9aa8ba", fontSize: 12 }}>Data sources</summary>
         <div style={{ fontSize: 9, color: "#3a4f6f", fontWeight: 800, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 10 }}>DATA SOURCES</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6, marginBottom: 22 }}>
           {sources.map((s, i) => (
@@ -1298,6 +1300,9 @@ function VaultPage() {
           ))}
         </div>
 
+        </details>
+
+        <p style={{ color: "#aab9ca", fontSize: 13, marginBottom: 16 }}>Add your Kalshi API Key ID and RSA private key below. Save each field.</p>
         {/* API Keys */}
         <div style={{ fontSize: 9, color: "#3a4f6f", fontWeight: 800, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 10 }}>API KEYS</div>
         {KEY_CONFIGS.map(cfg => {
@@ -3864,9 +3869,7 @@ function LegacyDashboard() {
       </div>
     </div>
     <div style={{ display: "flex", height: "calc(100vh - 49px)" }}>
-      <div style={{ width: 54, background: "#070c17", borderRight: "1px solid #14203a", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 10, gap: 4 }}>
-        {NAV.map(n => <button key={n.id} onClick={() => { sessionTracker.track("tab", n.id); setTab(n.id); }} title={n.id} style={{ width: 42, height: 42, borderRadius: 8, border: "none", cursor: "pointer", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center", background: tab === n.id ? "#00e8a410" : "transparent", borderLeft: `2px solid ${tab === n.id ? "#00e8a4" : "transparent"}` }}>{n.icon}</button>)}
-      </div>
+      <ToolNavigation items={NAV} active={tab} onSelect={id => { sessionTracker.track("tab", id); setTab(id); }} />
       <div style={{ flex: 1, display: "grid", gridTemplateColumns: tab === "vault" || compact ? "1fr" : "1fr 370px", overflow: "hidden" }}>
         <div style={{ overflow: "hidden", borderRight: tab === "vault" ? "none" : "1px solid #14203a" }}>
           {tab === "odds" && <OddsModule espn={espn} kalshi={kalshi} onSel={selMkt} loading={ldM} onFav={addFavorite} isFav={isFavorite} />}
@@ -3918,7 +3921,7 @@ function Dashboard() {
   const vault = useVault();
   const authFetch = useCallback((path, method, body) => {
     const ak = vault.getKey("kalshi_api_key"), pk = vault.getKey("kalshi_private_key");
-    if (!ak || !pk) return Promise.reject(new Error("Add your Kalshi API Key ID and private key in Connection"));
+    if (!ak || !pk) return Promise.reject(new Error("Add your Kalshi API Key ID and private key in Key Vault"));
     return kalshiAuthFetch(path, method, body, ak, pk);
   }, [vault]);
   if (vault.locked) return <LockScreen />;
