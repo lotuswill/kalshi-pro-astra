@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {sample} from '../../src/astra/sample.mjs';
 const {JSDOM}=await import(process.env.JSDOM_MODULE||'jsdom');
 const dom=new JSDOM('<!doctype html><body><div id="host"></div></body>',{url:'http://127.0.0.1:5174',pretendToBeVisual:true});
-const w=dom.window,intervals=new Map();let seq=0,hang=false;const writes=[];
+const w=dom.window,intervals=new Map();let seq=0,hang=false,listingCalls=0,listingMode='paged';const writes=[];
 for(const key of ['window','document','localStorage','FormData','File','Blob'])Object.defineProperty(globalThis,key,{value:key==='window'?w:w[key],configurable:true,writable:true});
 Object.defineProperty(globalThis,'navigator',{value:w.navigator,configurable:true});
 Object.defineProperty(w.navigator,'locks',{value:{request:async(_name,_opts,fn)=>fn({})}});
@@ -12,7 +12,14 @@ const raw=m=>({ticker:m.id,title:m.title,status:'active',notional_value_dollars:
 globalThis.fetch=async(url,{signal}={})=>{
   if(hang)await new Promise((_,reject)=>{if(signal.aborted)reject(new Error('Aborted'));else signal.addEventListener('abort',()=>reject(new Error('Aborted')),{once:true});});
   const markets=sample().markets.filter(m=>m.venue==='kalshi');
-  if(url.includes('/markets?'))return {ok:true,json:async()=>({markets:markets.filter(m=>m.legs.length>1).map(raw),cursor:null})};
+  if(url.includes('/markets?')){
+    listingCalls++;
+    const cursor=new URL(url,'http://localhost').searchParams.get('cursor');
+    const page=cursor?Number(cursor):0;
+    if(listingMode==='zero'||listingMode==='repeat'||page<2)return {ok:true,json:async()=>({markets:markets.filter(m=>m.legs.length>1).map(m=>({...raw(m),ticker:`ZERO-${page}-${m.id}`,open_interest_fp:'0.00'})),cursor:listingMode==='repeat'?'1':String(page+1)})};
+    assert.equal(page,2,'Must follow opaque listing cursors through the zero-OI pages');
+    return {ok:true,json:async()=>({markets:markets.filter(m=>m.legs.length>1).map(raw),cursor:null})};
+  }
   const id=decodeURIComponent(url.split('/markets/')[1]?.split('/')[0]),m=markets.find(m=>m.id===id);
   return {ok:!!m,status:m?200:404,json:async()=>url.includes('orderbook')?{orderbook_fp:{yes_dollars:m.bids,no_dollars:m.asks.map(([p,q])=>[1-p,q])}}:{market:raw(m)}};
 };
@@ -37,13 +44,28 @@ click('[data-action="draft"]');await idle();assert.equal(JSON.parse(localStorage
 click('[data-action="paper"]');submit();await idle();assert.equal(JSON.parse(localStorage.getItem('kalshi-astra-combo-paper-v1:test')).pending.length,1);
 click('[data-action="refresh"]');await idle();assert.equal(JSON.parse(localStorage.getItem('kalshi-astra-combo-paper-v1:test')).positions.length,1);
 click('[data-page="paper"]');click('[data-settle]');for(const input of shadow.querySelectorAll('dialog input'))input.value='1';submit();await idle();assert.equal(JSON.parse(localStorage.getItem('kalshi-astra-combo-paper-v1:test')).positions[0].status,'settled');
-click('[data-page="scanner"]');click('[data-action="live"]');await idle();click('button[data-market="kalshi:DEMO-ABCD"]');
+click('[data-page="scanner"]');click('[data-action="live"]');await idle();
+assert.equal(listingCalls,3,'Initial load must search past zero-OI pages');
+assert.equal(shadow.querySelectorAll('tbody tr').length,5);
+assert.match($('[data-oi-diagnostics]').textContent,/12 with zero OI/);
+const filter=value=>{const input=$('[data-filter="minOI"]');input.value=String(value);input.dispatchEvent(new w.Event('change',{bubbles:true}));};
+for(const [min,count] of [[1,6],[10,6],[100000,5]]){filter(min);assert.equal(shadow.querySelectorAll('tbody tr').length,count);}
+filter(0);assert.equal(shadow.querySelectorAll('tbody tr').length,18);filter(100000);
+click('button[data-market="kalshi:DEMO-ABCD"]');
 // Explicitly select the retained ABD subset; no remote write before approval.
 const variant=[...shadow.querySelectorAll('button[data-variant]')].find(b=>b.textContent.includes('DEMO-3'));assert.ok(variant);variant.click();
 click('[data-action="create-market"]');assert.equal(writes.length,0);submit();await idle();assert.equal(writes.length,1);assert.equal(writes[0].body.selected_markets.length,3);
 click('[data-action="rfq-original"]');assert.equal(writes.length,1);submit();await idle();assert.equal(writes.length,2);assert.equal(writes[1].body.rest_remainder,false);
 click('[data-action="cancel-rfq"]');await idle();assert.equal(writes[2].method,'DELETE');
-click('[data-page="scanner"]');hang=true;click('[data-action="live"]');await new Promise(r=>setTimeout(r,0));assert.equal($('[data-action="kill"]').disabled,false);click('[data-action="kill"]');await idle();hang=false;
+click('[data-page="scanner"]');listingMode='zero';listingCalls=0;click('[data-action="live"]');await idle();
+assert.equal(listingCalls,20,'Search must stop at its page budget');assert.equal(shadow.querySelectorAll('tbody tr').length,0);
+assert.match(root.textContent,/Page budget reached/);assert.match(root.textContent,/highest reported OI: 0/);
+assert.equal($('[data-action="scan-pages"]').disabled,false);
+click('[data-action="scan-pages"]');await idle();assert.equal(listingCalls,40,'Continue must retain the cursor');
+listingMode='repeat';listingCalls=0;click('[data-action="live"]');
+for(let i=0;i<25;i++)await new Promise(r=>setTimeout(r,0));
+assert.match($('[role="alert"]').textContent,/repeated a pagination cursor/);assert.equal(listingCalls,2);
+hang=true;click('[data-action="live"]');await new Promise(r=>setTimeout(r,0));assert.equal($('[data-action="kill"]').disabled,false);click('[data-action="kill"]');await idle();hang=false;
 assert.ok(writes.every(r=>!r.path.includes('/orders')&&!r.path.includes('/accept')));
 dispose();assert.equal(intervals.size,0);assert.equal(root.children.length,0);assert.equal(shadow.querySelector('dialog'),null);
 dom.window.close();console.log('Integrated shadow-DOM workflow passed: scanner, paper lifecycle, explicit create/RFQ approvals, cancel, Stop, and unmount cleanup.');

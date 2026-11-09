@@ -117,3 +117,24 @@ for the integrated DOM workflow, and `npm run build` for the production build.
 Tests use simulated exchange responses, never a funded account. Live creation,
 RFQ lifecycle and order execution have not been exercised against your account.
 The DOM test verifies behavior, not browser layout or Windows installation.
+
+## Open-interest discovery correction
+
+The live listing can begin with hundreds of newly created combos reporting
+`open_interest_fp: "0.00"`. Loading only its first page made every positive OI
+minimum appear broken. Load Kalshi markets now follows up to 20 pages (200
+records each), stopping early at 20 matches or end of listing. Search more
+continues from the cursor for another bounded batch. Stop interrupts requests.
+The catalog keeps room for leg-book refreshes and stops discovery before its
+10,000-instrument limit; repeated cursors are rejected. Filters are fixed while
+a batch runs. This remains a partial listing scan, not an exchange-wide index.
+
+Diagnostics show maximum reported combo OI, positive/zero/unknown counts, and
+the same figures after other filters. Minimum OI zero disables the OI filter;
+unknown stays unknown and cannot pass a positive minimum. OI remains the combo's
+own outstanding contract count, never a sum or product of its legs' OI.
+
+Regression coverage includes zero-OI pages before a funded combo, thresholds
+1/10/100000, missing and fractional OI, pagination budgets, continuation,
+repeated cursors, and Stop. Public API inspection reproduced all-zero initial
+pages and positive OI on later pages; no account or order endpoint was used.

@@ -73,11 +73,22 @@ export function scan(catalog,options={},now=Date.now()) {
     return {...m,product,gap:unit(m.bid)&&isFresh(m,now)&&product!==null?m.bid-product:null,expirationForFilter:expirationFor(m,catalog,f.expiryBasis)};
   }).filter(m=>{
     const vol=f.volumePeriod==='24h'?m.volume24h:m.volume;
-    return (f.venue==='all'||m.venue===f.venue)&&['open','active'].includes(m.status)&&(!m.closeAt||m.closeAt>now)&&finite(m.openInterest)&&m.openInterest>=f.minOI&&(f.minVolume===0||(finite(vol)&&vol>=f.minVolume))&&positive(m.expirationForFilter)&&m.expirationForFilter>now&&m.expirationForFilter<=now+f.hours*3600000&&`${m.title} ${m.id} ${m.legs.map(l=>l.title||l.marketId).join(' ')}`.toLowerCase().includes(f.search.toLowerCase());
+    return (f.venue==='all'||m.venue===f.venue)&&['open','active'].includes(m.status)&&(!m.closeAt||m.closeAt>now)&&(f.minOI===0||(finite(m.openInterest)&&m.openInterest>=f.minOI))&&(f.minVolume===0||(finite(vol)&&vol>=f.minVolume))&&positive(m.expirationForFilter)&&m.expirationForFilter>now&&m.expirationForFilter<=now+f.hours*3600000&&`${m.title} ${m.id} ${m.legs.map(l=>l.title||l.marketId).join(' ')}`.toLowerCase().includes(f.search.toLowerCase());
   });
   const fields={expiration:'expirationForFilter',openInterest:'openInterest',volume:f.volumePeriod==='24h'?'volume24h':'volume',gap:'gap',bid:'bid',ask:'ask',legs:'legs'};
   const key=fields[f.sort]||'expirationForFilter';
   return rows.sort((a,b)=>{const av=key==='legs'?a.legs.length:a[key],bv=key==='legs'?b.legs.length:b[key];if(av==null)return bv==null?a.id.localeCompare(b.id):1;if(bv==null)return -1;return (av-bv)*(f.direction==='desc'?-1:1)||a.id.localeCompare(b.id);});
+}
+// Diagnose OI independently of the other active filters; unknown is not zero.
+export function scanDiagnostics(catalog, options={}, now=Date.now()) {
+  const rows=scan(catalog,{...options,minOI:0},now);
+  const summarize=markets=>markets.reduce((d,m)=>{
+    d.total++;
+    if(!finite(m.openInterest))d.unknown++;
+    else {d.max=d.max===null?m.openInterest:Math.max(d.max,m.openInterest);if(m.openInterest>0)d.positive++;else d.zero++;}
+    return d;
+  },{total:0,positive:0,zero:0,unknown:0,max:null});
+  return {loaded:summarize(catalog.markets.filter(m=>m.legs.length>=2)),otherFilters:summarize(rows)};
 }
 export function generateVariants(original,{maxRemoved=1,pinned=[],maxCandidates=128}={}) {
   checkLegs(original.legs);

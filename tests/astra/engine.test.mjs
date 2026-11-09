@@ -104,3 +104,14 @@ test('validation rejects units, identities and invalid limits',()=>{
   const {catalog}=setup();catalog.markets[0].ask=58;assert.throws(()=>E.validateCatalog(catalog),/decimal dollars/);assert.throws(()=>E.validateLimits({...E.DEFAULT_LIMITS,quantity:1.5}),/whole contracts/);
   assert.throws(()=>E.checkLegs([{marketId:'A',outcome:'yes'},{marketId:'A',outcome:'no'}]),/unique/);
 });
+
+test('OI diagnostics distinguish zero, missing and fractional contracts under other filters',()=>{
+  const {catalog,original}=setup();
+  catalog.markets=[{...original,id:'ZERO',openInterest:0},{...original,id:'UNKNOWN',openInterest:null},{...original,id:'FRACTIONAL',openInterest:23.54},{...original,id:'LATER',openInterest:100000,expiration:now+73*3600000}];
+  for(const minOI of [1,10])assert.deepEqual(E.scan(catalog,{minOI},now).map(m=>m.id),['FRACTIONAL']);
+  assert.equal(E.scan(catalog,{minOI:100000},now).length,0);
+  assert.equal(E.scan(catalog,{minOI:0},now).length,3);
+  const d=E.scanDiagnostics(catalog,{},now);
+  assert.deepEqual(d.otherFilters,{total:3,positive:1,zero:1,unknown:1,max:23.54});
+  assert.equal(d.loaded.max,100000);
+});
