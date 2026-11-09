@@ -1,0 +1,10 @@
+{
+  "appId": "com.lotuswill.kalshiproastra",
+  "appName": "Kalshi Pro Astra",
+  "webDir": "dist",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

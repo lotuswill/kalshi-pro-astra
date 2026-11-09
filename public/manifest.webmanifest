@@ -1,0 +1,25 @@
+{
+  "name": "Kalshi Pro Astra",
+  "short_name": "Kalshi Astra",
+  "description": "Personal Kalshi terminal with bid/ask combo research and reduced-leg hedge comparisons",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050910",
+  "theme_color": "#050910",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

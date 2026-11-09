@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+/android/
+*.apk
+
+.env
+.env.*
+*.pem
+*.key
+*.log

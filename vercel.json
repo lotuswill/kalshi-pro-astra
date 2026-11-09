@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/kalshi/:path*", "destination": "https://api.elections.kalshi.com/:path*" },
+    { "source": "/espn/:path*", "destination": "https://site.api.espn.com/:path*" },
+    { "source": "/sportsdb/:path*", "destination": "https://www.thesportsdb.com/:path*" },
+    { "source": "/ncaa/:path*", "destination": "https://data.ncaa.com/:path*" },
+    { "source": "/oddsapi/:path*", "destination": "https://api.the-odds-api.com/:path*" },
+    { "source": "/gsheet/:path*", "destination": "https://docs.google.com/:path*" }
+  ]
+}

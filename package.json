@@ -1,0 +1,34 @@
+{
+  "name": "kalshi-pro-astra",
+  "private": true,
+  "version": "8.0.0-astra.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
+    "test": "npm run test:legacy && npm run test:astra",
+    "test:watch": "vitest",
+    "scan": "node scripts/live-scan.mjs",
+    "report": "node scripts/unpack-report.mjs",
+    "data:import": "node scripts/import-data.mjs",
+    "test:legacy": "vitest run src/engine/__tests__",
+    "test:astra": "node --test tests/astra/*.test.mjs",
+    "test:ui": "node tests/astra/ui-smoke.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^31.0.0",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.9"
+  }
+}
