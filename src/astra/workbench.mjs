@@ -1,5 +1,6 @@
 import {DEFAULT_FILTERS,DEFAULT_LIMITS,validateCatalog,validateLimits,marketKey,legKey,signature,legMarket,legProduct,scan,scanDiagnostics,optimize,analyze,matchingMarkets,sortAlternatives,scenarioTable,draftFor} from './engine.mjs';
 import {emptyLedger,validateLedger,totals,queuePaper,cancelPending,processPending,settlePaper} from './paper.mjs';
+import {comboQuery,resolveComboTickers,REFERENCE_COMBO_TICKERS} from './ticker-lookup.mjs';
 import { createTransport } from './transport.mjs';
 import { createComboRequest, validateCreatedMarket, quoteObservations } from './venue.mjs';
 
@@ -10,6 +11,13 @@ let disposed=false,workspaceActive=true;
 const disclosures=new Set();
 const storageKey='kalshi-astra-combo-paper-v1:'+profile;
 const draftKey='kalshi-astra-combo-drafts-v1:'+profile;
+const tickerIndexKey='kalshi-astra-combo-tickers-v1:'+profile;
+let tickerIndex=[...REFERENCE_COMBO_TICKERS];
+try{const saved=JSON.parse(localStorage.getItem(tickerIndexKey)||'[]');if(Array.isArray(saved))tickerIndex=[...new Set([...tickerIndex,...saved.filter(id=>typeof id==='string'&&comboQuery(id).kind==='full').slice(-10000)])];}catch{}
+function rememberTickers(markets){
+  tickerIndex=[...new Set([...tickerIndex,...markets.filter(m=>m.venue==='kalshi'&&m.source==='live'&&comboQuery(m.id).kind==='full').map(m=>m.id)])].slice(-10000);
+  try{localStorage.setItem(tickerIndexKey,JSON.stringify(tickerIndex));}catch{/* Index persistence is optional; current-session lookup still works. */}
+}
 const transport=createTransport({apiBase,authFetch});
 const dialog=document.createElement('dialog');surface.append(dialog);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -21,7 +29,7 @@ const sign=v=>v==null?'':v>=0?'positive':'negative';
 const badge=(v,color='')=>`<span class="badge ${color}">${esc(v)}</span>`;
 const stat=(name,value,color='')=>`<div class="stat"><span>${esc(name)}</span><strong class="${color}">${esc(value)}</strong></div>`;
 const button=(action,label,disabled=false,cls='')=>`<button data-action="${action}" ${disabled?'disabled':''} class="${cls}">${label}</button>`;
-const s={page:'scanner',catalog:{version:1,markets:[]},source:'empty',cursor:null,pages:0,filters:{...DEFAULT_FILTERS},limits:{...DEFAULT_LIMITS},selected:null,pinned:new Set(),keep:new Set(),maxRemoved:1,selectedVariant:null,custom:false,sort:'cost',direction:'asc',busy:false,auto:false,error:'',notice:'',storageError:false,drafts:[],rfqs:[],ledger:emptyLedger()};
+const s={page:'scanner',catalog:{version:1,markets:[]},source:'empty',lookupIds:[],cursor:null,pages:0,filters:{...DEFAULT_FILTERS},limits:{...DEFAULT_LIMITS},selected:null,pinned:new Set(),keep:new Set(),maxRemoved:1,selectedVariant:null,custom:false,sort:'cost',direction:'asc',busy:false,auto:false,error:'',notice:'',storageError:false,drafts:[],rfqs:[],ledger:emptyLedger()};
 try{const stored=localStorage.getItem(storageKey);if(stored)s.ledger=validateLedger(JSON.parse(stored));const drafts=JSON.parse(localStorage.getItem(draftKey)||'[]');if(!Array.isArray(drafts)||drafts.length>500)throw new Error('Invalid draft store');s.drafts=drafts;}catch(e){s.error=`Local storage needs attention: ${e.message}. Paper actions are disabled; existing stored data was not replaced.`;s.storageError=true;}
 const original=()=>s.catalog.markets.find(m=>marketKey(m)===s.selected);
 function compare(){
@@ -41,7 +49,7 @@ function selectedRow(){const c=compare();return c.rows.find(r=>r.id===s.selected
 function pick(key){s.maxRemoved=1;s.selected=key;s.pinned.clear();s.custom=false;s.selectedVariant=null;s.keep=new Set(original()?.legs.map(legKey)||[]);s.page='optimizer';s.auto=false;}
 let requestAbort=null,stopRequested=false;
 async function json(url){if(disposed)throw new Error('Combos page closed');return transport(url,requestAbort?AbortSignal.any([requestAbort.signal,AbortSignal.timeout(60000)]):AbortSignal.timeout(60000));}
-function merge(markets){const map=new Map(s.catalog.markets.map(m=>[marketKey(m),m]));for(const m of markets){const old=map.get(marketKey(m));const sameRules=old&&JSON.stringify([old.legs,old.rules,old.payout])===JSON.stringify([m.legs,m.rules,m.payout]);map.set(marketKey(m),sameRules?{...m,rulesVerified:old.rulesVerified,productSettlement:old.productSettlement,fee:old.fee}:m);}s.catalog=validateCatalog({version:1,markets:[...map.values()]});}
+function merge(markets){const map=new Map(s.catalog.markets.map(m=>[marketKey(m),m]));for(const m of markets){const old=map.get(marketKey(m));const sameRules=old&&JSON.stringify([old.legs,old.rules,old.payout])===JSON.stringify([m.legs,m.rules,m.payout]);map.set(marketKey(m),sameRules?{...m,rulesVerified:old.rulesVerified,productSettlement:old.productSettlement,fee:old.fee}:m);}s.catalog=validateCatalog({version:1,markets:[...map.values()]});rememberTickers(markets);}
 async function paperChange(fn){
   if(disposed)throw new Error('Combos page closed');
   if(s.storageError)throw new Error('Resolve the local ledger storage problem first');
@@ -62,7 +70,7 @@ async function refresh(){
   if(!stopRequested&&s.ledger.pending.length)await paperChange(current=>processPending(current,s.catalog));
 }
 // Search a bounded batch instead of treating the first (often zero-OI) page as the market.
-async function discover(maxPages){
+async function discover(maxPages,suffix=null){
   let reason='Page budget reached';
   const seen=new Set();
   for(let page=0;page<maxPages&&!stopRequested&&!disposed;page++){
@@ -76,9 +84,42 @@ async function discover(maxPages){
     const matches=scan(s.catalog,s.filters).length;
     s.notice=`Searching: ${s.pages} pages loaded, ${matches} matches. Stop keeps loaded results.${result.warnings?.length?` ${result.warnings.length} unsupported records skipped on this page.`:''}`;
     render();
+    if(suffix&&resolveComboTickers(suffix,tickerIndex).length){reason='Suffix found';break;}
     if(!s.cursor){reason='End of listing reached';break;}
   }
   if(!stopRequested)s.notice=`${reason}. ${s.pages} pages loaded; ${scan(s.catalog,s.filters).length} matches. ${s.cursor?'Search more pages to continue. Results are not exchange-wide.':''} Listing quotes require a book refresh.`;
+}
+async function lookupTicker(){
+  s.auto=false;
+  const {kind,query}=comboQuery(s.filters.search);s.lookupIds=[];
+  if(kind==='text'){s.notice='Text search filters loaded markets. Enter a full combo ticker or its last 9 characters for direct lookup.';return;}
+  let ids=resolveComboTickers(query,[...tickerIndex,...s.catalog.markets.filter(m=>m.venue==='kalshi').map(m=>m.id)]);
+  if(!ids.length){
+    if(s.source!=='kalshi'){
+      if(s.ledger.pending.length)await paperChange(cancelPending);
+      s.catalog={version:1,markets:[]};s.source='kalshi';s.cursor=null;s.pages=0;s.selected=null;
+    }
+    if(!s.pages||s.cursor)await discover(20,query);
+    if(stopRequested||disposed)return;
+    ids=resolveComboTickers(query,tickerIndex);
+  }
+  if(!ids.length){s.notice=`Suffix ${query} was not found in known or searched tickers. This is not an exchange-wide suffix index. Paste the full ticker once to look it up directly and remember its suffix, or search more pages.`;return;}
+  if(ids.length>1){
+    s.notice=`${ids.length} tickers share suffix ${query}. Paste the exact full ticker to choose: ${ids.join(', ')}`;return;
+  }
+  const result=await json('/api/kalshi/market?ticker='+encodeURIComponent(ids[0]));
+  if(stopRequested||disposed)return;
+  if(s.source!=='kalshi'){
+    if(s.ledger.pending.length)await paperChange(cancelPending);
+    s.catalog={version:1,markets:[]};s.source='kalshi';s.cursor=null;s.pages=0;s.selected=null;
+  }
+  merge(result.markets);s.lookupIds=result.markets.map(marketKey);
+  s.notice='Direct ticker match shown below, independently of scanner filters. Select it to inspect its legs; refresh books for executable prices.';
+}
+function lookupResults(){
+  const matches=s.catalog.markets.filter(m=>s.lookupIds.includes(marketKey(m)));
+  if(!matches.length)return '';
+  return `<section class="panel padded"><h2>Direct ticker match</h2><p class="note">Shown regardless of open interest, expiration, leg-count filters, or top-100 rank.</p>${matches.map(m=>`<div class="paper-row"><button class="text-select" data-market="${esc(marketKey(m))}">${esc(m.title)}</button><p class="note">${esc(m.id)}</p><p class="note">${m.legs.length} legs · ${esc(m.status)} · OI ${number(m.openInterest)} · Expires ${when(m.expiration)}</p></div>`).join('')}</section>`;
 }
 function fold(id,label,body,cls=''){
   return `<details data-disclosure="${id}" class="${cls}" ${disclosures.has(id)?'open':''}><summary>${label}</summary>${body}</details>`;
@@ -87,11 +128,11 @@ function sourceControls(){return `<div class="actions">${button('live',s.source=
 function scanner(){
   const rows=scan(s.catalog,s.filters),f=s.filters,diagnostics=scanDiagnostics(s.catalog,f),oi=diagnostics.otherFilters;
   const opts=(values,value)=>values.map(([v,l])=>`<option value="${v}" ${v===value?'selected':''}>${l}</option>`).join('');
-  const advanced=`<div class="more-filters"><label class="field">Volume period<select data-filter="volumePeriod">${opts([['total','Total'],['24h','Last 24 hours']],f.volumePeriod)}</select></label><label class="field">Venue<select data-filter="venue">${opts([['all','All loaded venues'],['kalshi','Kalshi'],['polymarket-us','Polymarket US']],f.venue)}</select></label><label class="field">Expiration basis<select data-filter="expiryBasis">${opts([['combo','Combo expiration'],['first-leg','First leg expiration']],f.expiryBasis)}</select></label><label class="field">Order<select data-filter="direction">${opts([['asc','Ascending / earliest first'],['desc','Descending / largest first']],f.direction)}</select></label><label class="field">Maximum legs<input data-filter="maxLegs" type="number" min="2" max="12" value="${f.maxLegs}"></label>${button('reset-filters','Reset defaults',s.busy)}</div>`;
+  const advanced=`<div class="more-filters"><label class="field">Volume period<select data-filter="volumePeriod">${opts([['total','Total'],['24h','Last 24 hours']],f.volumePeriod)}</select></label><label class="field">Venue<select data-filter="venue">${opts([['all','All loaded venues'],['kalshi','Kalshi'],['polymarket-us','Polymarket US']],f.venue)}</select></label><label class="field">Expiration basis<select data-filter="expiryBasis">${opts([['combo','Combo expiration'],['first-leg','First leg expiration']],f.expiryBasis)}</select></label><label class="field">Order<select data-filter="direction">${opts([['asc','Ascending / earliest first'],['desc','Descending / largest first']],f.direction)}</select></label><label class="field">Maximum legs<input data-filter="maxLegs" type="number" min="2" max="32" value="${f.maxLegs}"></label>${button('reset-filters','Reset defaults',s.busy)}</div>`;
   const advancedCount=['volumePeriod','venue','expiryBasis','direction','maxLegs'].filter(k=>f[k]!==DEFAULT_FILTERS[k]).length;
   return `<div class="hero"><div><h1>Find combos</h1><p>Compare bids, asks, and the cost of each leg.</p></div>${sourceControls()}</div>
-  <section class="panel scanner-panel">
-  <fieldset class="filter-fields" ${s.busy?'disabled':''}><div class="filters"><label class="field">Search<input data-filter="search" value="${esc(f.search)}" placeholder="Title, ticker, or leg"></label><label class="field">Minimum open interest<input data-filter="minOI" type="number" min="0" value="${f.minOI}"></label><label class="field">Expires within (hours)<input data-filter="hours" type="number" min="1" value="${f.hours}"></label><label class="field">Minimum volume<input data-filter="minVolume" type="number" min="0" value="${f.minVolume}"></label><label class="field">Sort by<select data-filter="sort">${opts([['expiration','First expiration'],['openInterest','Open interest'],['volume','Volume'],['gap','Bid − leg ask product'],['bid','Combo bid'],['ask','Combo ask'],['legs','Leg count']],f.sort)}</select></label></div>
+  ${lookupResults()}<section class="panel scanner-panel">
+  <fieldset class="filter-fields" ${s.busy?'disabled':''}><div class="filters"><label class="field">Search<input data-filter="search" value="${esc(f.search)}" placeholder="Title, ticker, or last 9 characters"><small>Press Enter to look up a ticker</small></label><label class="field">Minimum open interest<input data-filter="minOI" type="number" min="0" value="${f.minOI}"></label><label class="field">Expires within (hours)<input data-filter="hours" type="number" min="1" value="${f.hours}"></label><label class="field">Minimum volume<input data-filter="minVolume" type="number" min="0" value="${f.minVolume}"></label><label class="field">Sort by<select data-filter="sort">${opts([['expiration','First expiration'],['openInterest','Open interest'],['volume','Volume'],['gap','Bid − leg ask product'],['bid','Combo bid'],['ask','Combo ask'],['legs','Leg count']],f.sort)}</select></label></div>
   ${fold('filters',`More filters${advancedCount?` · ${advancedCount} changed`:''}`,advanced,'filter-disclosure')}</fieldset>
   <div class="results-bar"><strong>Showing ${number(Math.min(100,rows.length))} of ${number(rows.length)} matches</strong><span>${number(diagnostics.loaded.total)} combos loaded</span><span>Highest OI: ${number(diagnostics.loaded.max)}</span>${badge(s.source==='sample'?'SYNTHETIC':s.source==='kalshi'?'KALSHI':s.source==='import'?'IMPORTED':'NO DATA',s.source==='sample'?'amber':'')}</div>
   ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Combo</th><th>Legs</th><th>Open interest</th><th>${f.volumePeriod==='24h'?'24h':'Total'} volume</th><th>Expiration · Denver</th><th>Bid</th><th>Ask</th><th>Leg ask product</th><th>Bid − product</th></tr></thead><tbody>${rows.slice(0,100).map(m=>`<tr class="click-row" data-market="${esc(marketKey(m))}"><td class="name"><button class="text-select" data-market="${esc(marketKey(m))}">${esc(m.title)}</button><small>${esc(m.venue)} · ${esc(m.id)}</small></td><td>${m.legs.length}</td><td>${number(m.openInterest)}</td><td>${number(f.volumePeriod==='24h'?m.volume24h:m.volume)}</td><td>${when(m.expirationForFilter)}</td><td>${px(m.bid)}</td><td>${px(m.ask)}</td><td>${px(m.product)}</td><td class="${sign(m.gap)}">${px(m.gap)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><strong>${s.catalog.markets.length?'No loaded combos match these filters':'Start with a market catalog'}</strong><p>${s.catalog.markets.length?(oi.total&&f.minOI>0?`None of the ${number(oi.total)} loaded combos passing your other filters meets minimum OI ${number(f.minOI)}. Highest reported OI in that group: ${number(oi.max)}. `:'No loaded combos pass your other filters. ')+(s.cursor?'Search more pages to continue; this is not a search of the entire exchange. ':'Review expiration, volume, search, and leg-count filters. ')+ 'Unknown OI is shown as — and cannot satisfy a positive minimum.':'Load synthetic examples to try the complete workflow, load public Kalshi markets, or import a catalog from either app.'}</p></div>`}
@@ -109,7 +150,7 @@ function optimizer(){
   <section class="panel"><div class="panel-head"><div><h2>Alternative combinations</h2><p>Sorted by full hedge purchase cost after fees. Prices are quote-based; leg products remain comparison benchmarks.</p></div><div class="actions"><select aria-label="Alternative sort" id="alt-sort">${[['cost','Hedge cost + fees'],['change','Ask change'],['gap','Original bid − hedge ask'],['worst','Worst-case P&L'],['capital','Capital required'],['product','Leg ask product']].map(([v,l])=>`<option value="${v}" ${s.sort===v?'selected':''}>${l}</option>`).join('')}</select><select aria-label="Alternative order" id="alt-direction"><option value="asc" ${s.direction==='asc'?'selected':''}>Ascending</option><option value="desc" ${s.direction==='desc'?'selected':''}>Descending</option></select></div></div>
   <div class="table-wrap"><table><thead><tr><th>Removed legs</th><th>Remaining</th><th>Bid</th><th>Ask</th><th>Ask change</th><th>Leg ask product</th><th>Original bid − ask</th><th>Hedge cost + fees</th><th>Worst P&L</th><th>Status</th></tr></thead><tbody>${c.rows.map(r=>`<tr class="click-row ${r.id===row?.id?'selected':''}" data-variant="${esc(r.id)}"><td class="name"><button class="small-btn" data-variant="${esc(r.id)}">${esc(r.removed.map(l=>l.title||l.marketId).join(' + '))}</button></td><td>${r.legs.length}</td><td>${px(r.candidate?.bid)}</td><td>${px(r.candidate?.ask)}</td><td>${px(r.askDelta)}</td><td>${px(r.product)}</td><td class="${sign(r.gap)}">${px(r.gap)}</td><td>${r.buy&&r.buy.fee!==null?money(r.buy.value+r.buy.fee):'—'}</td><td class="${sign(r.worst)}">${money(r.worst)}</td><td>${badge(r.eligible?'Paper-ready':r.candidate?'Review':'Quote required',r.eligible?'green':'amber')}</td></tr>`).join('')}</tbody></table></div></section>`;
 }
-function scenarios(o,row){const rows=scenarioTable(o,row.legs,row.net,s.limits.quantity);return `<div class="scenario-scroll gap-top"><table><thead><tr>${o.legs.map((l,i)=>`<th>Leg ${i+1} YES settlement</th>`).join('')}<th>Net P&L</th></tr></thead><tbody>${rows.slice(0,64).map(r=>`<tr>${o.legs.map(l=>`<td>${r.values[l.marketId]}</td>`).join('')}<td class="${sign(r.pnl)}">${money(r.pnl)}</td></tr>`).join('')}</tbody></table></div><p class="note">Showing ${Math.min(64,rows.length)} of ${rows.length} binary scenarios. With matching product-settlement rules, scalar settlements in [0,1] are also bounded by the displayed worst/best cases. Some binary combinations may be impossible due to related events; no independence assumption is needed for the subset payoff bound.</p>`;}
+function scenarios(o,row){if(o.legs.length>12)return '<p class="note gap-top">The full scenario table is limited to 12 legs. For this larger combo, the displayed subset payoff bounds are calculated without enumerating every outcome.</p>';const rows=scenarioTable(o,row.legs,row.net,s.limits.quantity);return `<div class="scenario-scroll gap-top"><table><thead><tr>${o.legs.map((l,i)=>`<th>Leg ${i+1} YES settlement</th>`).join('')}<th>Net P&L</th></tr></thead><tbody>${rows.slice(0,64).map(r=>`<tr>${o.legs.map(l=>`<td>${r.values[l.marketId]}</td>`).join('')}<td class="${sign(r.pnl)}">${money(r.pnl)}</td></tr>`).join('')}</tbody></table></div><p class="note">Showing ${Math.min(64,rows.length)} of ${rows.length} binary scenarios. With matching product-settlement rules, scalar settlements in [0,1] are also bounded by the displayed worst/best cases. Some binary combinations may be impossible due to related events; no independence assumption is needed for the subset payoff bound.</p>`;}
 function paperPage(){
   let t;try{t=totals(s.ledger);}catch(e){return `<div class="notice error">${esc(e.message)}</div>`;}
   return `<div class="hero"><div><h1>Paper trading</h1><p>Manual approval or automatic paper monitoring. No exchange orders are submitted.</p></div>${button('kill','Stop & cancel pending',false,'danger')}</div><div class="stats">${stat('Free simulated cash',money(t.free))}${stat('Reserved capital',money(t.reserved))}${stat('Realized paper P&L',money(t.realized),sign(t.realized))}${stat('Daily gross losses · Denver',money(t.dailyLoss))}</div>
@@ -186,10 +227,10 @@ root.addEventListener('click',e=>{const el=e.target.closest('button,[data-market
   if(action==='paper'){try{previewPaper();}catch(e){s.error=e.message;render();}return;}
   if(action==='create-market'){creationDialog();return;}if(action==='rfq-original'||action==='rfq-hedge'){rfqDialog(action==='rfq-original'?original():selectedRow()?.candidate);return;}if(action==='manual-quote'){quoteDialog();return;}if(action==='review'){reviewDialog();return;}
   work(async()=>{
-    if(action==='sample'){s.auto=false;if(s.ledger.pending.length)await paperChange(cancelPending);s.catalog=validateCatalog(await json('/api/sample'));s.source='sample';s.cursor=null;s.pages=0;s.selected=null;s.notice='Synthetic example catalog loaded. No account connection is used.';}
+    if(action==='sample'){s.auto=false;if(s.ledger.pending.length)await paperChange(cancelPending);s.lookupIds=[];s.catalog=validateCatalog(await json('/api/sample'));s.source='sample';s.cursor=null;s.pages=0;s.selected=null;s.notice='Synthetic example catalog loaded. No account connection is used.';}
     if(action==='live'){
       s.auto=false;if(s.ledger.pending.length)await paperChange(cancelPending);
-      s.catalog={version:1,markets:[]};s.cursor=null;s.pages=0;s.selected=null;s.source='kalshi';
+      s.lookupIds=[];s.catalog={version:1,markets:[]};s.cursor=null;s.pages=0;s.selected=null;s.source='kalshi';
       await discover(20);
     }
     if(action==='more'||action==='scan-pages'){
@@ -219,9 +260,10 @@ root.addEventListener('click',e=>{const el=e.target.closest('button,[data-market
     if(action==='kill'){s.auto=false;await paperChange(cancelPending);s.notice='Stopped. Pending paper orders cancelled. Existing paper positions remain open.';}
   });
 });
+root.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.dataset.filter==='search'){e.preventDefault();s.filters={...s.filters,search:e.target.value.trim()};work(lookupTicker);}});
 root.addEventListener('change',e=>{const el=e.target;try{
   if(el.id==='import-file'){const file=el.files?.[0];if(!file)return;work(async()=>{if(file.size>15000000)throw new Error('Maximum catalog size is 15 MB');const data=validateCatalog(JSON.parse(await file.text()));const updating=s.source==='import';if(!updating&&s.ledger.pending.length)await paperChange(cancelPending);s.auto=false;s.catalog={...data,markets:data.markets.map(m=>({...m,source:'import'}))};s.source='import';s.cursor=null;if(!updating||!original())s.selected=null;if(updating&&s.ledger.pending.length)await paperChange(current=>processPending(current,s.catalog));s.notice='Imported observations retain their timestamps. Imported quotes are not eligible for automatic paper execution.';});return;}
-  if(el.dataset.filter){const k=el.dataset.filter,n=['minOI','minVolume','hours','minLegs','maxLegs'].includes(k);if(n&&(el.value===''||!Number.isFinite(Number(el.value))))throw new Error('Enter a valid numeric filter');s.filters={...s.filters,[k]:n?Number(el.value):el.value};}
+  if(el.dataset.filter){if(el.dataset.filter==='search')s.lookupIds=[];const k=el.dataset.filter,n=['minOI','minVolume','hours','minLegs','maxLegs'].includes(k);if(n&&(el.value===''||!Number.isFinite(Number(el.value))))throw new Error('Enter a valid numeric filter');s.filters={...s.filters,[k]:n?Number(el.value):el.value};}
   if(el.dataset.limit){if(s.auto)return;const next={...s.limits,[el.dataset.limit]:el.value===''?NaN:Number(el.value)};validateLimits(next);s.limits=next;}
   if(el.dataset.keep){if(el.checked)s.keep.add(el.dataset.keep);else s.keep.delete(el.dataset.keep);s.custom=true;}
   if(el.dataset.pin){if(el.checked){s.pinned.add(el.dataset.pin);s.keep.add(el.dataset.pin);}else s.pinned.delete(el.dataset.pin);s.custom=false;}

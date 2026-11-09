@@ -1,4 +1,4 @@
-export const DEFAULT_FILTERS = Object.freeze({ minOI:1, minVolume:0, volumePeriod:'total', hours:72, expiryBasis:'combo', minLegs:2, maxLegs:12, search:'', venue:'all', sort:'openInterest', direction:'desc' });
+export const DEFAULT_FILTERS = Object.freeze({ minOI:1, minVolume:0, volumePeriod:'total', hours:72, expiryBasis:'combo', minLegs:2, maxLegs:32, search:'', venue:'all', sort:'openInterest', direction:'desc' });
 export const DEFAULT_LIMITS = Object.freeze({ quantity:10, maxQuoteAgeSec:30, maxQuoteSkewSec:10, maxSpread:0.10, maxCapital:100, maxTotalCapital:500, maxPerUnderlying:200, minWorstPnl:0, maxDailyLoss:50, slippage:0.005 });
 export const num = x => x === null || x === undefined || x === '' || typeof x === 'boolean' ? null : Number.isFinite(Number(x)) ? Number(x) : null;
 export const unit = x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
@@ -9,7 +9,7 @@ export const legKey = l => JSON.stringify([l.marketId,l.outcome]);
 export const signature = (venue, legs) => JSON.stringify([venue,...legs.map(legKey).sort()]);
 export const marketKey = m => `${m.venue}:${m.id}`;
 export function checkLegs(legs) {
-  if (!Array.isArray(legs) || legs.length<1 || legs.length>12) throw new Error('Use 1–12 legs');
+  if (!Array.isArray(legs) || legs.length<1 || legs.length>32) throw new Error('Use 1–32 legs');
   const ids=new Set();
   for(const l of legs){
     if(!text(l.marketId,300)||!['yes','no'].includes(l.outcome)||ids.has(l.marketId)) throw new Error('Each leg needs a unique market ID and an explicit yes/no outcome');
@@ -73,7 +73,7 @@ export function scan(catalog,options={},now=Date.now()) {
     return {...m,product,gap:unit(m.bid)&&isFresh(m,now)&&product!==null?m.bid-product:null,expirationForFilter:expirationFor(m,catalog,f.expiryBasis)};
   }).filter(m=>{
     const vol=f.volumePeriod==='24h'?m.volume24h:m.volume;
-    return (f.venue==='all'||m.venue===f.venue)&&['open','active'].includes(m.status)&&(!m.closeAt||m.closeAt>now)&&(f.minOI===0||(finite(m.openInterest)&&m.openInterest>=f.minOI))&&(f.minVolume===0||(finite(vol)&&vol>=f.minVolume))&&positive(m.expirationForFilter)&&m.expirationForFilter>now&&m.expirationForFilter<=now+f.hours*3600000&&`${m.title} ${m.id} ${m.legs.map(l=>l.title||l.marketId).join(' ')}`.toLowerCase().includes(f.search.toLowerCase());
+    return (f.venue==='all'||m.venue===f.venue)&&['open','active'].includes(m.status)&&(!m.closeAt||m.closeAt>now)&&(f.minOI===0||(finite(m.openInterest)&&m.openInterest>=f.minOI))&&(f.minVolume===0||(finite(vol)&&vol>=f.minVolume))&&positive(m.expirationForFilter)&&m.expirationForFilter>now&&m.expirationForFilter<=now+f.hours*3600000&&`${m.title} ${m.id} ${m.legs.map(l=>l.title||l.marketId).join(' ')}`.toLowerCase().includes(f.search.trim().toLowerCase());
   });
   const fields={expiration:'expirationForFilter',openInterest:'openInterest',volume:f.volumePeriod==='24h'?'volume24h':'volume',gap:'gap',bid:'bid',ask:'ask',legs:'legs'};
   const key=fields[f.sort]||'expirationForFilter';

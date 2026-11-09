@@ -28,7 +28,7 @@ not zero. `expiration` is settlement expiration; `closeAt` is trading close.
 `quoteAt` is when that specific quote was observed, never the export time.
 
 Venues: `kalshi`, `polymarket-us`. Tradable states: `open`, `active`. Each market
-has 1–12 unique underlying IDs and explicit `yes`/`no` outcomes. Exact quote
+has 1–32 unique underlying IDs and explicit `yes`/`no` outcomes. Exact quote
 matching is venue + sorted set of underlying IDs and outcomes. Supply canonical
 YES single instruments with `id` matching their sole leg's `marketId` so the
 engine can find each required leg; NO prices are complemented from these.

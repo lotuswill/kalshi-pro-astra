@@ -32,3 +32,13 @@ test('RFQ observations preserve separate makers and reject stale, wrong-market o
   const result=quoteObservations([base,{...base,id:'q2',contracts_fp:'9.00'},{...base,id:'old',updated_ts:new Date(now-31000).toISOString()},{...base,id:'other',market_ticker:'OTHER'}],r,now);
   assert.equal(result.length,3);assert.equal(result[0].ask,.4);assert.equal(result[0].usable,true);assert.equal(result[1].usable,false);assert.equal(result[2].usable,false);
 });
+
+test('direct combo lookup accepts 17 legs and does not require a book or scanner eligibility',async()=>{
+  const ticker='KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G';
+  const market={ticker,title:'17-leg fixture',status:'closed',open_interest_fp:'0.00',mve_selected_legs:Array.from({length:17},(_,i)=>({market_ticker:`LEG-${i}`,event_ticker:`EVENT-${i}`,side:i%2?'no':'yes'}))};
+  const calls=[];const transport=createTransport({apiBase:'/kalshi/trade-api/v2',fetcher:async url=>{calls.push(url);return {ok:true,json:async()=>({market})};}});
+  const data=await transport('/api/kalshi/market?ticker='+ticker.toLowerCase());
+  assert.equal(data.markets[0].legs.length,17);assert.equal(data.markets[0].openInterest,0);assert.equal(data.markets[0].status,'closed');assert.equal(calls.length,1);assert.ok(!calls[0].includes('orderbook'));
+  await assert.rejects(()=>transport('/api/kalshi/market?ticker=WRONG'),/identity mismatch/);
+  await assert.rejects(()=>transport('/api/kalshi/market?ticker=%2Fetc'),/Invalid market/);
+});

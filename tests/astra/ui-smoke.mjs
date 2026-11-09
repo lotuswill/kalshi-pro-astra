@@ -8,10 +8,15 @@ Object.defineProperty(globalThis,'navigator',{value:w.navigator,configurable:tru
 Object.defineProperty(w.navigator,'locks',{value:{request:async(_name,_opts,fn)=>fn({})}});
 w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
 w.setInterval=(fn,ms)=>{intervals.set(++seq,{fn,ms});return seq;};w.clearInterval=id=>intervals.delete(id);
+const referenceTicker='KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G';let directCalls=0;
 const raw=m=>({ticker:m.id,title:m.title,status:'active',notional_value_dollars:'1.00',mve_selected_legs:m.legs.length>1?m.legs.map(l=>({market_ticker:l.marketId,event_ticker:l.eventId,side:l.outcome})):undefined,open_interest_fp:String(m.openInterest),volume_fp:String(m.volume),volume_24h_fp:String(m.volume24h),expiration_time:new Date(m.expiration).toISOString(),close_time:new Date(m.closeAt).toISOString(),yes_bid_dollars:String(m.bid),yes_ask_dollars:String(m.ask),mve_collection_ticker:'COLLECTION'});
 globalThis.fetch=async(url,{signal}={})=>{
   if(hang)await new Promise((_,reject)=>{if(signal.aborted)reject(new Error('Aborted'));else signal.addEventListener('abort',()=>reject(new Error('Aborted')),{once:true});});
   const markets=sample().markets.filter(m=>m.venue==='kalshi');
+  if(url.endsWith('/markets/'+referenceTicker)){
+    directCalls++;
+    return {ok:true,json:async()=>({market:{...raw(markets.find(m=>m.legs.length>1)),ticker:referenceTicker,title:'17-leg lookup fixture',open_interest_fp:'0.00',expiration_time:new Date(Date.now()+90*3600000).toISOString(),mve_selected_legs:Array.from({length:17},(_,i)=>({market_ticker:`LOOKUP-LEG-${i}`,event_ticker:`LOOKUP-EVENT-${i}`,side:'yes'}))}})};
+  }
   if(url.includes('/markets?')){
     listingCalls++;
     const cursor=new URL(url,'http://localhost').searchParams.get('cursor');
@@ -77,6 +82,14 @@ assert.equal($('tbody tr').dataset.market,'kalshi:LATER-HIGH');
 assert.equal([...shadow.querySelectorAll('tbody tr')].at(-1).dataset.market,'kalshi:RANK-22');
 assert.match(root.textContent,/Showing 100 of 121 matches/);
 hang=true;click('[data-action="live"]');await new Promise(r=>setTimeout(r,0));assert.equal($('[data-action="kill"]').disabled,false);click('[data-action="kill"]');await idle();hang=false;
+const findTicker=async value=>{const input=$('[data-filter="search"]');input.value=value;input.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await idle();};
+await findTicker(' egy4ztq7g ');assert.equal(directCalls,1);
+assert.match(root.textContent,/Direct ticker match/);assert.match(root.textContent,/17 legs/);
+assert.equal(shadow.querySelectorAll('tbody tr').length,0,'Lookup should be visible even when normal filters exclude it');
+assert.ok(JSON.parse(localStorage.getItem('kalshi-astra-combo-tickers-v1:test')).includes(referenceTicker));
+click(`button[data-market="kalshi:${referenceTicker}"]`);assert.equal(shadow.querySelectorAll('[data-keep]').length,17);
+click('[data-page="scanner"]');await findTicker(referenceTicker.toLowerCase());assert.equal(directCalls,2);
+listingMode='zero';listingCalls=0;await findTicker('UNKNOWN99');assert.equal(listingCalls,20);assert.match(root.textContent,/not an exchange-wide suffix index/);
 assert.ok(writes.every(r=>!r.path.includes('/orders')&&!r.path.includes('/accept')));
 dispose();assert.equal(intervals.size,0);assert.equal(root.children.length,0);assert.equal(shadow.querySelector('dialog'),null);
 dom.window.close();console.log('Integrated shadow-DOM workflow passed: scanner, paper lifecycle, explicit create/RFQ approvals, cancel, Stop, and unmount cleanup.');

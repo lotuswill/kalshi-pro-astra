@@ -167,3 +167,23 @@ The matching count includes all loaded matches; the visible table is capped at
 explicit; this is not an exchange-wide top-100 index. Reset defaults restores
 these settings. Regression coverage includes a higher-OI combo on a later page
 replacing an earlier result after the first page already had 120 matches.
+
+## Direct ticker and suffix lookup; larger combos
+
+The user-supplied reference KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G
+was confirmed through the public market endpoint to contain 17 legs. The prior
+12-leg catalog validator skipped it entirely. Catalog validation, default scan
+leg count and leg editing now support up to 32 legs. Scenario enumeration stays
+limited to 12; optimization stays bounded to 128 candidate alternatives.
+
+Enter a full ticker in Search and press Enter for a direct metadata request.
+A separate result remains visible regardless of scanner filters, market status
+or top-100 placement. Books and execution gates remain independent. Full lookup
+works even if the order book is unavailable. Ticker identity is verified.
+
+Suffix lookup resolves exactly the last nine characters, case-insensitively,
+against a per-profile local ticker index plus the named user-supplied reference.
+Only IDs are persisted; lookup metadata is fetched afresh. Unseen suffixes search
+up to 20 listing pages and report incomplete coverage. Suffix collisions require
+the full ticker rather than choosing an arbitrary market. No quote acceptance
+or real order capability was added.

@@ -16,6 +16,14 @@ export function createTransport({apiBase,fetcher=(...args)=>fetch(...args)}={}) 
       for(const raw of data.markets){try{const m=kalshiMarket(raw);checkLegs(m.legs);if(m.legs.length<2)continue;validateCatalog({version:1,markets:[m]});markets.push(m);}catch(e){warnings.push(e.message);}}
       return {version:1,markets,cursor:data.cursor||null,warnings};
     }
+    if(url.pathname==='/api/kalshi/market'){
+      const ticker=assertTicker((url.searchParams.get('ticker')||'').trim().toUpperCase());
+      const data=await get('/markets/'+encodeURIComponent(ticker),signal);
+      if(data.market?.ticker!==ticker)throw new Error('Market identity mismatch');
+      const m=kalshiMarket(data.market);checkLegs(m.legs);
+      if(m.legs.length<2)throw new Error('This ticker is not a combo');
+      return validateCatalog({version:1,markets:[m]});
+    }
     if(url.pathname==='/api/kalshi/snapshot'){
       const ids=[...new Set((url.searchParams.get('ids')||'').split(',').filter(Boolean))];if(!ids.length||ids.length>40)throw new Error('Refresh 1–40 instruments');ids.forEach(assertTicker);
       const queue=[...ids],markets=[],errors=[];

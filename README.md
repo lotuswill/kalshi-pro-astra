@@ -90,3 +90,22 @@ scans are interrupted and automatic paper monitoring pauses when leaving Combos;
 it does not restart automatically on return. More → Other tools opens the
 original sports terminal on demand, including its live trading controls.
 Sports feeds, trackers and sportsbook fetches do not start in the combo workspace.
+
+### Finding a specific combo
+
+Paste its full ticker in Search and press Enter. Direct lookup fetches the exact
+market and displays it separately from the filtered top-100 table, even when
+OI, expiration, status or leg-count filters exclude it. Select the result to
+inspect its legs, then refresh the books for executable prices.
+
+Nine-character suffixes also work for previously seen or looked-up tickers.
+The user-supplied reference `KXMVECROSSCATEGORY-S2026S5C36JL3LF2DS5U3-EGY4ZTQ7G`
+is included in the reference list, so `EGY4ZTQ7G` resolves on a fresh install.
+Only ticker IDs are remembered; full lookups always fetch fresh metadata.
+Unknown suffixes search up to 20 more listing pages; paste the full ticker if
+that partial search misses it. Ambiguous suffixes require choosing a full ID.
+
+Discovery and leg editing support up to 32 legs (previously 12). Optimization
+remains bounded to 128 candidates; full scenario enumeration remains limited
+to 12 legs to keep large combos responsive. Lookup does not bypass paper gates
+or accept any quote.
