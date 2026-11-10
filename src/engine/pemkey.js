@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// PEM KEY LOADER — accept any sane RSA private key format.
+// PEM KEY LOADER — RSA PKCS#1 and RSA/Ed25519 PKCS#8.
 //
 // WebCrypto's importKey only speaks PKCS#8 ("BEGIN PRIVATE KEY"),
 // but RSA keys in the wild — including freshly generated Kalshi API
@@ -72,8 +72,35 @@ export function pemToPkcs8Der(pem) {
     case "pkcs1": return pkcs1ToPkcs8(pemToDer(pem));
     case "encrypted": throw friendly("This private key is passphrase-protected (BEGIN ENCRYPTED PRIVATE KEY). Export it without a passphrase: openssl pkcs8 -in key.pem -topk8 -nocrypt -out key-plain.pem");
     case "openssh": throw friendly("This is an OpenSSH-format key (from ssh-keygen). Kalshi needs a plain RSA key — use the key file Kalshi gave you, or convert: ssh-keygen -p -m PEM -f key");
-    case "ec": throw friendly("This is an EC key — Kalshi request signing needs the RSA private key from your Kalshi API-key download.");
+    case "ec": throw friendly("This is an EC key — use the RSA or Ed25519 private key from your Kalshi API-key download.");
     case "public": throw friendly("That's the PUBLIC key. Paste the PRIVATE key file Kalshi gave you when the API key was created (it's only downloadable once — if it's gone, generate a new API key).");
     default: throw friendly("Unrecognized key format — paste the full PEM exactly as downloaded from Kalshi, including the -----BEGIN…----- and -----END…----- lines.");
   }
+}
+
+// Read the PKCS#8 AlgorithmIdentifier, not the PEM label or a byte-pattern
+// search (both supported algorithms can have a BEGIN PRIVATE KEY label).
+export function privateKeyAlgorithm(der) {
+  function read(offset, tag, limit) {
+    if (offset + 2 > limit || der[offset++] !== tag) throw friendly("Invalid private key structure. Check the complete PEM file in Key Vault.");
+    let length = der[offset++];
+    if (length & 0x80) {
+      const count = length & 0x7f;
+      if (!count || count > 4 || offset + count > limit) throw friendly("Invalid private key length.");
+      length = 0;
+      for (let i = 0; i < count; i++) length = length * 256 + der[offset++];
+    }
+    if (offset + length > limit) throw friendly("The private key data is incomplete. Load the complete PEM in Key Vault.");
+    return { start: offset, end: offset + length };
+  }
+  const root = read(0, 0x30, der.length);
+  if (root.end !== der.length) throw friendly("Unexpected data after the private key.");
+  const version = read(root.start, 0x02, root.end);
+  const algorithm = read(version.end, 0x30, root.end);
+  const oid = read(algorithm.start, 0x06, algorithm.end);
+  const identifier = Array.from(der.subarray(oid.start, oid.end)).map(n => n.toString(16).padStart(2, '0')).join('');
+  read(algorithm.end, 0x04, root.end);
+  if (identifier === '2a864886f70d010101') return 'RSA-PSS';
+  if (identifier === '2b6570') return 'Ed25519';
+  throw friendly("Unsupported private key algorithm. Use the RSA or Ed25519 key downloaded from Kalshi.");
 }

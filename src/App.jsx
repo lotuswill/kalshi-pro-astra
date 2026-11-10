@@ -15,7 +15,7 @@ import { detectBots } from "./engine/bots.js";
 import { generateSuggestion } from "./engine/suggestions.js";
 import { KALSHI_GAME_SERIES, KALSHI_PROGRESSION_SERIES } from "./engine/series.js";
 import { normalizeEvent, normalizeOrderbook, normalizeTrades, normalizeFills } from "./engine/normalize.js";
-import { pemToPkcs8Der } from "./engine/pemkey.js";
+import { kalshiAuthHeaders, signKalshiMessage } from "./engine/kalshi-auth.js";
 import { toV2Order, orderIdOf, ORDERS_V2_PATH } from "./engine/orders.js";
 import { findFreshMarkets, findSettlementLags, findNearCertain, espnGameState } from "./engine/live.js";
 import { analyzeFills, parseCSV, summarizeSheet } from "./engine/fills.js";
@@ -76,15 +76,9 @@ class KalshiWebSocketEngine {
     if (this.ws?.readyState === WebSocket.OPEN) return;
     // Generate auth for the WS connection
     try {
-      const timestamp = Date.now().toString();
-      const method = "GET";
-      const path = "/trade-api/ws/v2";
-      const message = timestamp + method + path;
-      const pemBody = privateKeyPem.replace(/-----BEGIN [\w\s]+-----/, "").replace(/-----END [\w\s]+-----/, "").replace(/\s/g, "");
-      const der = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
-      const key = await crypto.subtle.importKey("pkcs8", der, { name: "RSA-PSS", hash: "SHA-256" }, false, ["sign"]);
-      const sig = await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, key, new TextEncoder().encode(message));
-      const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
+      const headers = await kalshiAuthHeaders(apiKeyId, privateKeyPem, "GET", "/trade-api/ws/v2");
+      const timestamp = headers["KALSHI-ACCESS-TIMESTAMP"];
+      const sigB64 = headers["KALSHI-ACCESS-SIGNATURE"];
 
       const wsUrl = `${KALSHI_WS_URL}?api_key=${apiKeyId}&timestamp=${timestamp}&signature=${encodeURIComponent(sigB64)}`;
       this.ws = new WebSocket(wsUrl);
@@ -794,14 +788,14 @@ const ESPN_PPD_LEAGUES = [
 
 const KEY_CONFIGS = [
   { id: "kalshi_api_key", label: "Kalshi API Key", desc: "Required for placing orders. Generate at kalshi.com → Settings → API Keys.", required: true, multiline: false, placeholder: "e.g. eea82a0e-57b2-4bdf-..." },
-  { id: "kalshi_private_key", label: "Kalshi RSA Private Key (PEM)", desc: "Used for request-signing on authenticated trading endpoints.", required: true, multiline: true, placeholder: "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----" },
+  { id: "kalshi_private_key", label: "Kalshi Private Key (RSA or Ed25519 PEM)", desc: "Used for request-signing on authenticated trading endpoints.", required: true, multiline: true, placeholder: "Paste the complete RSA or Ed25519 PEM, including BEGIN/END lines" },
   { id: "the_odds_api", label: "The Odds API ⭐ RECOMMENDED", desc: "FREE 500 req/month — theoddsapi.com — Powers the arbitrage scanner with odds from DraftKings, FanDuel, BetMGM, Caesars, PointsBet, BetRivers, Bovada, and 10+ more sportsbooks. Sign up takes 30 seconds, no credit card.", required: false, multiline: false, placeholder: "Your API key from theoddsapi.com..." },
   { id: "api_sports", label: "API-Sports (RapidAPI)", desc: "Free 100 req/day — api-sports.io — Deep stats, lineups, fixtures.", required: false, multiline: false, placeholder: "x-rapidapi-key..." },
   { id: "sportsdata_io", label: "SportsData.io", desc: "Free dev tier — sportsdata.io — Player stats & projections.", required: false, multiline: false, placeholder: "API key..." },
   { id: "balldontlie", label: "BallDontLie", desc: "Free tier — balldontlie.io — NBA, NFL, MLB, NHL stats.", required: false, multiline: false, placeholder: "API key..." },
   { id: "football_data_org", label: "Football-Data.org", desc: "Free 10 req/min — football-data.org — European soccer leagues.", required: false, multiline: false, placeholder: "API token..." },
   { id: "mentor_kalshi_api_key", label: "Mentor: Kalshi API Key", desc: "The methodology creator's Kalshi API key — used by the 🧭 Mentor tab to ingest his fills and profile his trading patterns.", required: false, multiline: false, placeholder: "His Kalshi API key id..." },
-  { id: "mentor_kalshi_private_key", label: "Mentor: Kalshi RSA Private Key (PEM)", desc: "Signs the read-only /portfolio/fills requests for the Mentor tab.", required: false, multiline: true, placeholder: "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----" },
+  { id: "mentor_kalshi_private_key", label: "Mentor: Kalshi Private Key (RSA or Ed25519 PEM)", desc: "Signs the read-only /portfolio/fills requests for the Mentor tab.", required: false, multiline: true, placeholder: "Paste the complete RSA or Ed25519 PEM, including BEGIN/END lines" },
   { id: "mentor_sheet_csv_url", label: "Mentor: Google Sheet CSV URL", desc: "His sheet's published-CSV link (File → Share → Publish to web → CSV) for ingesting his calculations.", required: false, multiline: false, placeholder: "https://docs.google.com/spreadsheets/d/e/.../pub?output=csv" },
 ];
 
@@ -997,59 +991,13 @@ async function safeFetch(url, opts = {}) {
 }
 function fmtTime(iso) { return iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"; }
 
-// ─── Kalshi RSA-PSS Signature Auth ───────────────────────────
-// Kalshi requires: KALSHI-ACCESS-KEY + KALSHI-ACCESS-TIMESTAMP + KALSHI-ACCESS-SIGNATURE
-// Signature = RSA-PSS(SHA256) sign of: timestamp_ms + method + path_without_query
-async function kalshiAuthHeaders(apiKeyId, privateKeyPem, method, path) {
-  if (!apiKeyId || !privateKeyPem) return null;
-  // Web Crypto only exists in secure contexts — https:// or localhost.
-  // A plain http:// LAN address (e.g. http://192.168.x.x:5173 from a
-  // tablet) silently loses crypto.subtle and every signature fails.
-  if (!(globalThis.crypto && globalThis.crypto.subtle)) {
-    throw new Error("Web Crypto is unavailable here — open the app over https:// or on localhost (a plain http:// LAN address can't sign requests). The installed APK and the Vercel site both work.");
-  }
-  try {
-    const timestamp = Date.now().toString();
-    const pathOnly = path.split("?")[0]; // Strip query params
-    const message = timestamp + method.toUpperCase() + pathOnly;
-
-    // Accepts PKCS#8 and PKCS#1 (BEGIN RSA PRIVATE KEY) keys; throws
-    // instructive errors for encrypted/OpenSSH/public-key pastes.
-    const der = pemToPkcs8Der(privateKeyPem);
-
-    // Import RSA private key
-    const key = await crypto.subtle.importKey(
-      "pkcs8", der,
-      { name: "RSA-PSS", hash: "SHA-256" },
-      false, ["sign"]
-    );
-
-    // Sign with RSA-PSS
-    const sig = await crypto.subtle.sign(
-      { name: "RSA-PSS", saltLength: 32 },
-      key,
-      new TextEncoder().encode(message)
-    );
-
-    return {
-      "Content-Type": "application/json",
-      "KALSHI-ACCESS-KEY": apiKeyId,
-      "KALSHI-ACCESS-TIMESTAMP": timestamp,
-      "KALSHI-ACCESS-SIGNATURE": btoa(String.fromCharCode(...new Uint8Array(sig))),
-    };
-  } catch (e) {
-    console.error("[Kalshi Auth] Signature failed:", e);
-    if (e && e.friendly) throw e;
-    throw new Error(`The private key was read but signing failed (${e.message}). The key may be truncated — re-paste the entire key file into the Key Vault.`);
-  }
-}
-
+// ─── Kalshi authenticated REST requests ───────────────────────
 async function kalshiAuthFetch(path, method, body, apiKeyId, privateKeyPem) {
   // The path sent to Kalshi must be the full API path (not the proxy path).
   // Signatures cover the path WITHOUT query params (per Kalshi's starter kit).
   const kalshiPath = "/trade-api/v2" + path.split("?")[0];
   const headers = await kalshiAuthHeaders(apiKeyId, privateKeyPem, method, kalshiPath);
-  if (!headers) throw new Error("Failed to generate auth signature. Check your API key and RSA private key in the Key Vault.");
+  if (!headers) throw new Error("Failed to generate auth signature. Check your API key and private key in the Key Vault.");
 
   const res = await fetch(`${KALSHI_API}${path}`, {
     method,
@@ -1252,13 +1200,14 @@ function VaultPage() {
   const vault = useVault();
   const [editVals, setEditVals] = useState({});
   const [showVals, setShowVals] = useState({});
+  const [keyChecks, setKeyChecks] = useState({});
   const [customName, setCustomName] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const fileRef = useRef(null);
 
   const getEdit = (id) => editVals[id] ?? vault.keys[id] ?? "";
-  const setEdit = (id, v) => setEditVals(p => ({ ...p, [id]: v }));
+  const setEdit = (id, v) => { setEditVals(p => ({ ...p, [id]: v })); setKeyChecks(p => ({ ...p, [id]: null })); };
 
   const sources = [
     { name: "ESPN", note: "No key needed", ok: true },
@@ -1302,7 +1251,7 @@ function VaultPage() {
 
         </details>
 
-        <p style={{ color: "#aab9ca", fontSize: 13, marginBottom: 16 }}>Add your Kalshi API Key ID and RSA private key below. Save each field.</p>
+        <p style={{ color: "#aab9ca", fontSize: 13, marginBottom: 16 }}>Add your Kalshi API Key ID and private key below. Save each field.</p>
         {/* API Keys */}
         <div style={{ fontSize: 9, color: "#3a4f6f", fontWeight: 800, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 10 }}>API KEYS</div>
         {KEY_CONFIGS.map(cfg => {
@@ -1328,6 +1277,13 @@ function VaultPage() {
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <button onClick={async () => { const v = getEdit(cfg.id)?.trim(); if (v) { await vault.setKey(cfg.id, v); vault.showToast(`${cfg.label} saved`); } }}
                   style={{ background: "linear-gradient(135deg,#00e8a4,#00c48c)", border: "none", borderRadius: 5, padding: "5px 14px", color: "#050910", fontSize: 10, fontWeight: 800, cursor: "pointer", ...S.m }}>SAVE</button>
+                {["kalshi_private_key", "mentor_kalshi_private_key"].includes(cfg.id) && <button onClick={async () => {
+                  setKeyChecks(p => ({ ...p, [cfg.id]: "Testing locally…" }));
+                  try {
+                    const { algorithm } = await signKalshiMessage(getEdit(cfg.id), "Astra local signing check — not an API request");
+                    setKeyChecks(p => ({ ...p, [cfg.id]: `${algorithm} signing works locally. This checks the current field, not Kalshi account access. Save any edits before reading positions.` }));
+                  } catch (error) { setKeyChecks(p => ({ ...p, [cfg.id]: error.message })); }
+                }} style={{ ...S.inp, width: "auto", cursor: "pointer" }}>Test signing</button>}
                 {!cfg.multiline && <button onClick={() => setShowVals(p => ({ ...p, [cfg.id]: !p[cfg.id] }))}
                   style={{ background: "#14203a20", border: "1px solid #14203a", borderRadius: 5, padding: "5px 12px", color: "#5a6f8f", fontSize: 10, cursor: "pointer", ...S.m }}>{vis ? "HIDE" : "SHOW"}</button>}
                 {has && <button onClick={async () => { await vault.removeKey(cfg.id); setEdit(cfg.id, ""); vault.showToast(`Removed`); }}
@@ -1335,6 +1291,7 @@ function VaultPage() {
                 {has && <button onClick={() => { navigator.clipboard.writeText(vault.keys[cfg.id]); vault.showToast("Copied to clipboard"); }}
                   style={{ background: "#14203a20", border: "1px solid #14203a", borderRadius: 5, padding: "5px 12px", color: "#5a6f8f", fontSize: 10, cursor: "pointer", ...S.m }}>COPY</button>}
               </div>
+              {keyChecks[cfg.id] && <p role="status" style={{ color: "#aab9ca", fontSize: 12, marginTop: 10 }}>{keyChecks[cfg.id]}</p>}
             </div>
           );
         })}
@@ -1604,7 +1561,7 @@ function TradeModule({ mkt, ob, settings }) { const vault = useVault(); useEffec
     if (!mkt?.ticker) return setSt({ t: "error", m: "No market selected — click a market from the Odds or Arbitrage tab first" });
     if (!ak) return setSt({ t: "error", m: "No API key — go to the 🔐 Key Vault tab and add your Kalshi API key" });
     const pk = vault.getKey("kalshi_private_key");
-    if (!pk) return setSt({ t: "error", m: "No RSA private key — add your Kalshi private key (PEM format) in the 🔐 Key Vault tab. You need both the API Key ID and the Private Key to trade." });
+    if (!pk) return setSt({ t: "error", m: "No private key — add your Kalshi private key (PEM format) in the 🔐 Key Vault tab. You need both the API Key ID and the Private Key to trade." });
     const p = parseInt(price), q2 = parseInt(qty);
     if (!p || !q2 || p < 1 || p > 99 || q2 < 1) return setSt({ t: "error", m: "Price must be 1-99¢, quantity must be ≥ 1" });
     if (!confirming) { setConfirming(true); return; }
@@ -1693,7 +1650,7 @@ function TradeModule({ mkt, ob, settings }) { const vault = useVault(); useEffec
             </div>
             <button onClick={async () => {
               const pk = vault.getKey("kalshi_private_key");
-              if (!ak || !pk) { setSt({ t: "error", m: "Add both API Key and RSA Private Key in 🔐 Key Vault to trade" }); return; }
+              if (!ak || !pk) { setSt({ t: "error", m: "Add both API Key and Private Key in 🔐 Key Vault to trade" }); return; }
               const q = parseInt(qty) || 10;
               setSt({ t: "pending", m: "Placing both legs simultaneously..." });
               try {
@@ -3455,7 +3412,7 @@ function MentorModule({ sheetTrackOn, onToggleSheetTrack, changeTick }) {
   const loadFills = async () => {
     setErr(""); setBusy("fills");
     try {
-      if (!mk || !mp) throw new Error("Add the mentor's Kalshi API key + RSA private key in the Vault tab first (mentor_kalshi_api_key / mentor_kalshi_private_key).");
+      if (!mk || !mp) throw new Error("Add the mentor's Kalshi API key + private key in the Vault tab first (mentor_kalshi_api_key / mentor_kalshi_private_key).");
       const data = await kalshiAuthFetch("/portfolio/fills?limit=200", "GET", null, mk, mp);
       const norm = normalizeFills(data.fills || []);
       setFills(norm);
@@ -3813,7 +3770,7 @@ function LegacyDashboard() {
   useEffect(() => { if (!mkt?.ticker) return; ir.current = setInterval(() => { fetchOB(mkt.ticker).then(setOb); fetchTr(mkt.ticker).then(setTrades); }, 5000); return () => clearInterval(ir.current); }, [mkt]);
   const vaultAuthFetch = useCallback((path, method, body) => {
     const ak = vault.getKey("kalshi_api_key"), pk = vault.getKey("kalshi_private_key");
-    if (!ak || !pk) return Promise.reject(new Error("Add your Kalshi API Key ID and RSA private key in the 🔐 Key Vault tab"));
+    if (!ak || !pk) return Promise.reject(new Error("Add your Kalshi API Key ID and private key in the 🔐 Key Vault tab"));
     return kalshiAuthFetch(path, method, body, ak, pk);
   }, [vault]);
   const refresh = () => { sessionTracker.track("refresh"); fetchAll(); fetchPP(); if (mkt?.ticker) { fetchOB(mkt.ticker).then(d => { setOb(d); setDataAge(prev => ({...prev, ob: Date.now()})); }); fetchTr(mkt.ticker).then(d => { setTrades(d); setDataAge(prev => ({...prev, trades: Date.now()})); }); } };

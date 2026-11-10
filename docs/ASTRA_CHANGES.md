@@ -238,3 +238,23 @@ the vault no longer sits below 19 other icons. The vault's data-source overview
 is collapsed by default so the Kalshi credential fields are easier to reach,
 and its header wraps on narrow screens. Existing encrypted storage and saving
 behavior are unchanged.
+
+## RSA and Ed25519 account signing
+
+Kalshi's current API-key documentation supports RSA and Ed25519, with Ed25519
+selected by default in the dashboard. The app previously imported every key
+as RSA-PSS; a valid Ed25519 PKCS#8 key reproduced its opaque import failure.
+The shared REST/WebSocket signer now reads the PKCS#8 algorithm identifier,
+uses Ed25519 directly or RSA-PSS/SHA-256 with a 32-byte salt, and preserves
+PKCS#1 RSA conversion. Vault labels accept either type and Test signing checks
+the current field locally without sending an API request or saving changes.
+Import and signing failures now report their stage and safe error name instead
+of assuming truncation. Existing encrypted keys do not need migration.
+
+Tests use generated keys and independently verify signatures for Ed25519,
+PKCS#1 RSA and PKCS#8 RSA, including query exclusion and Windows line endings.
+They also cover the previous import failure, malformed keys, unsupported
+algorithms, and browsers without algorithm support. No user credentials or
+authenticated account calls are used in these tests.
+
+Reference: https://docs.kalshi.com/getting_started/api_keys
